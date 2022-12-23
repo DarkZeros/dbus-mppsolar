@@ -10,7 +10,7 @@
 . /opt/victronenergy/serial-starter/run-service.sh
 
 app=/data/etc/dbus-vevor-inverter/dbus-vevor-inverter.py
-args="--dbus system -s /dev/$tty"
+args="-b 2400 -s /dev/$tty"
 
 # Baudrates to use
-start $args -b 2400
+start $args
