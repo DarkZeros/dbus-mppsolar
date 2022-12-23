@@ -7,17 +7,18 @@ DBus VenusOS driver for Vevor inverter
   -- git clone --recurse-submodules https://github.com/DarkZeros/dbus-vevor-inverter /data/etc/dbus-vevor-inverter
   -- Need velib_python for execution of the service
   -- Need mpp-solar to communicate with Inverter
+  -- Install pip & then install mpp-solar package
 
 - Symlink & install service
    ln -s /data/etc/dbus-vevor-inverter/service-templates /opt/victronenergy/service-templates/dbus-vevor-inverter
 
-- Add service to  /etc/venus/serial-starter.conf and modify the default list:
+- Add service to  /etc/venus/serial-starter.conf and optionally modify the default list to run for all cases:
 ...
 service vevor           dbus-vevor-inverter
-alias   default         gps:vedirect:vevor
+alias   default         gps:vedirect:vevor 
 ...
 
-- Add udev rule to run the service only if you connect your VEVOR inverter:
+- Or add udev rule to run the service only if you connect your VEVOR inverter:
 
 /etc/udev/rules.d/serial-starter.rules
 
