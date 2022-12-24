@@ -1,0 +1,4 @@
+#!/bin/sh
+echo "*** starting dbus-mppsolar ***"
+exec 2>&1
+exec /data/etc/dbus-mppsolar/start-dbus-mppsolar.sh TTY
