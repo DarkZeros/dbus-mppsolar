@@ -9,8 +9,8 @@ DBus VenusOS driver for MPPSolar inverter or compatible one
   -- Need mpp-solar to communicate with Inverter
   -- Install pip & then install mpp-solar package
 
-- Symlink & install service
-   ln -s /data/etc/dbus-mppsolar/service /opt/victronenergy/service-templates/dbus-mppsolar
+- Install service
+  cp -R /data/etc/dbus-mppsolar/service /opt/victronenergy/service-templates/dbus-mppsolar
 
 - Add service to  /etc/venus/serial-starter.conf (and optionally modify the default list to run for all cases):
 ...
