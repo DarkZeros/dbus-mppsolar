@@ -25,7 +25,10 @@ from vedbus import VeDbusService
 
 def getInverterData():
     global args
-    return json.loads(sp.getoutput("mpp-solar -b {} -P pi30revo -p {} -o json --getstatus".format(args.baudrate, args.serial)))
+    return json.loads(sp.getoutput("mpp-solar -b {} -P pi30 -p {} -o json --getstatus".format(args.baudrate, args.serial)))
+
+def isNaN(num):
+    return num != num
 
 class DbusMppSolarService(object):
     def __init__(self, servicename, deviceinstance, paths, productname='MPPSolar Inverter', connection='MPPSolar interface'):
@@ -54,11 +57,7 @@ class DbusMppSolarService(object):
         GLib.timeout_add(10000, self._update)
 
     def _update(self):
-        try:
-            data = getInverterData()
-        except e:
-            logging.info('Exception: {}'.format(e))
-            return True
+        data = getInverterData()
         logging.info(data)
         with self._dbusservice as s:
             if 'error' in data and 'short' in data['error']:
@@ -74,20 +73,18 @@ class DbusMppSolarService(object):
             # Normal operation, read data
             s['/Mode'] = 3
             s['/State'] = 9
-            if 'battery_voltage' in data:
-                s['/Dc/0/Voltage'] = data['battery_voltage'] * 10
+            s['/Dc/0/Voltage'] = data.get('battery_voltage', None)
+            s['/Dc/0/Current'] = data.get('battery_discharge_current', None)
 
-            if 'ac_input_voltage' in data:
-                s['/Ac/In/1/L1/V'] = data['ac_input_voltage']
-            if 'ac_input_frequency' in data:
-                s['/Ac/In/1/L1/F'] = data['ac_input_frequency']
+            s['/Ac/In/1/L1/V'] = data.get('ac_input_voltage', None)
+            s['/Ac/In/1/L1/F'] = data.get('ac_input_frequency', None)
+            s['/Ac/Out/L1/V'] = data.get('ac_output_voltage', None)
+            s['/Ac/Out/L1/V'] = data.get('ac_output_voltage', None)
+            s['/Ac/Out/L1/F'] = data.get('ac_output_frequency', None)
+            #s['/Ac/Out/L1/P'] = data.get('ac_output_load', None)
 
-            if 'ac_output_voltage' in data:
-                s['/Ac/Out/L1/V'] = data['ac_output_voltage']
-            if 'ac_output_frequency' in data:
-                s['/Ac/Out/L1/F'] = data['ac_output_frequency']
-            if 'ac_output_load' in data:
-                s['/Ac/Out/L1/P'] = data['ac_output_load']
+            powDc = data.get('battery_voltage', float("NAN")) * data.get('battery_discharge_current', float("NAN"))
+            s['/Ac/Out/L1/P'] = None if isNaN(powDc) else powDc
 
         return True
 
