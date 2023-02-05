@@ -56,7 +56,7 @@ class DbusMppSolarService(object):
             self._dbusservice.add_path(
                 path, settings['initial'], writeable=True, onchangecallback=self._handlechangedvalue)
 
-        GLib.timeout_add(5000, self._update)
+        GLib.timeout_add(2000, self._update)
 
     def _update(self):
         raw = getInverterData('QPIGS#QMOD#QPIWS')
@@ -73,8 +73,15 @@ class DbusMppSolarService(object):
                 s['/State'] = 9 # Inverting
             elif invMode == 'Line':
                 s['/State'] = 8 # Passthru
+            elif invMode == 'Standby':
+                s['/State'] = 0 # Standby? Off?
             else:
                 s['/State'] = 0 # OFF
+
+            # For my installation specific case: 
+            # - When we are in standbymode, the AC1/OUT are connected directly, and inverter is bypassed
+            if invMode == 'Standby':
+                data['ac_output_active_power'] =  data['ac_output_aparent_power'] = None
             
             # 1=Charger Only;2=Inverter Only;3=On;4=Off
             # 0=Off;1=Low Power;2=Fault;3=Bulk;4=Absorption;5=Float;6=Storage;7=Equalize;8=Passthru;9=Inverting;10=Power assist;11=Power supply;252=External control
