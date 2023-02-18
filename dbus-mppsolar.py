@@ -25,7 +25,7 @@ from vedbus import VeDbusService
 
 def getInverterData(command):
     global args
-    output = sp.getoutput("mpp-solar -b {} -P pi30 -p {} -o json -c {}".format(args.baudrate, args.serial, command)).split('\n')
+    output = sp.getoutput("mpp-solar -b {} -P PI30 -p {} -o json -c {}".format(args.baudrate, args.serial, command)).split('\n')
     return [json.loads(o) for o in output]
 
 def isNaN(num):
