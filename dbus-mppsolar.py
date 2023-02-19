@@ -16,6 +16,7 @@ import sys
 import os
 import subprocess as sp
 import json
+from enum import Enum
 
 # our own packages
 sys.path.insert(1, os.path.join(os.path.dirname(__file__), 'velib_python'))
@@ -23,10 +24,38 @@ from vedbus import VeDbusService
 # Should we import and call manually?
 # sys.path.insert(1, os.path.join(os.path.dirname(__file__), 'mpp-solar'))
 
-def getInverterData(command):
+def runInverterCommand(command):
     global args
-    output = sp.getoutput("mpp-solar -b {} -P PI30 -p {} -o json -c {}".format(args.baudrate, args.serial, command)).split('\n')
-    return [json.loads(o) for o in output]
+    global mainloop
+    try: 
+        output = sp.getoutput("mpp-solar -b {} -P PI30 -p {} -o json -c {}".format(args.baudrate, args.serial, command)).split('\n')
+        parsed = [json.loads(o) for o in output]
+    except Exception(e):
+        mainloop.quit()
+    return parsed
+
+def setOutputSource(source):
+    #POP<NN>: Setting device output source priority
+    #    NN = 00 for utility first, 01 for solar first, 02 for SBU priority
+    runInverterCommand('POP{:02d}'.format(source))
+
+def setChargerPriority(priority):
+    #PCP<NN>: Setting device charger priority
+    #  For KS: 00 for utility first, 01 for solar first, 02 for solar and utility, 03 for only solar charging
+    #  For MKS: 00 for utility first, 01 for solar first, 03 for only solar charging
+    runInverterCommand('PCP{:02d}'.format(priority))
+
+def setMaxChargingCurrent(current):
+    #MNCHGC<mnnn><cr>: Setting max charging current (More than 100A)
+    #  Setting value can be gain by QMCHGCR command.
+    #  nnn is max charging current, m is parallel number.
+    runInverterCommand('MNCHGC0{:04d}'.format(current))
+
+def setMaxUtilityChargingCurrent(current):
+    #MUCHGC<nnn><cr>: Setting utility max charging current
+    #  Setting value can be gain by QMCHGCR command.
+    #  nnn is max charging current, m is parallel number.
+    runInverterCommand('MUCHGC{:03d}'.format(current))
 
 def isNaN(num):
     return num != num
@@ -44,7 +73,7 @@ class DbusMppSolarService(object):
         self._dbusservice.add_path('/Mgmt/Connection', connection)
 
         # Create the mandatory objects
-        invData = getInverterData('QID#QVFW')
+        invData = runInverterCommand('QID#QVFW')
         self._dbusservice.add_path('/DeviceInstance', deviceinstance)
         self._dbusservice.add_path('/ProductId', invData[0].get('serial_number', 0))
         self._dbusservice.add_path('/ProductName', productname)
@@ -59,15 +88,17 @@ class DbusMppSolarService(object):
         GLib.timeout_add(2000, self._update)
 
     def _update(self):
-        raw = getInverterData('QPIGS#QMOD#QPIWS')
+        raw = runInverterCommand('QPIGS#QMOD#QPIWS')
         data, mode, warnings = raw
         logging.info(raw)
         with self._dbusservice as s:
-            if 'error' in data and 'short' in data['error']:
-                s['/Mode'] = 4 # OFF
-            else:
-                s['/Mode'] = 3 # ON
+            # 1=Charger Only;2=Inverter Only;3=On;4=Off
+            #if 'error' in data and 'short' in data['error']:
+            #    s['/Mode'] = 4 # OFF
+            #else:
+            #    s['/Mode'] = 3 # ON
             
+            # 0=Off;1=Low Power;2=Fault;3=Bulk;4=Absorption;5=Float;6=Storage;7=Equalize;8=Passthru;9=Inverting;10=Power assist;11=Power supply;252=External control
             invMode = mode.get('device_mode', None)
             if invMode == 'Battery':
                 s['/State'] = 9 # Inverting
@@ -81,10 +112,7 @@ class DbusMppSolarService(object):
             # For my installation specific case: 
             # - When we are in standbymode, the AC1/OUT are connected directly, and inverter is bypassed
             if invMode == 'Standby':
-                data['ac_output_active_power'] =  data['ac_output_aparent_power'] = None
-            
-            # 1=Charger Only;2=Inverter Only;3=On;4=Off
-            # 0=Off;1=Low Power;2=Fault;3=Bulk;4=Absorption;5=Float;6=Storage;7=Equalize;8=Passthru;9=Inverting;10=Power assist;11=Power supply;252=External control
+                data['ac_output_active_power'] = data['ac_output_aparent_power'] = None          
 
             # Normal operation, read data
             s['/Dc/0/Voltage'] = data.get('battery_voltage', None)
@@ -99,12 +127,23 @@ class DbusMppSolarService(object):
             s['/Ac/In/1/L1/F'] = data.get('ac_input_frequency', None)
 
             # It does not give us power of AC in, we need to compute it from the current state + Output power
-            s['/Ac/In/1/L1/P'] = 0 if invMode == 'Battery' and s['/Mode'] == 3 else s['/Ac/Out/L1/P']
+            s['/Ac/In/1/L1/P'] = 0 if invMode == 'Battery' else s['/Ac/Out/L1/P']
+
+            # Update some Alarms          
+            s['/Alarms/HighTemperature'] = warnings['over_temperature_fault'] != '0'
+            s['/Alarms/Overload'] = warnings['overload_fault'] != '0'
+            s['/Alarms/HighVoltage'] = warnings['bus_over_fault'] != '0'
+            s['/Alarms/LowVoltage'] = warnings['bus_under_fault'] != '0'
+            s['/Alarms/HighVoltageAcOut'] = warnings['inverter_voltage_too_high_fault'] != '0'
+            s['/Alarms/LowVoltageAcOut'] = warnings['inverter_voltage_too_low_fault'] != '0'
+            s['/Alarms/HighDcVoltage'] = warnings['battery_voltage_to_high_fault'] != '0'
+            s['/Alarms/LowDcVoltage'] = warnings['battery_low_alarm_warning'] != '0'
+            s['/Alarms/LineFail'] =  warnings['line_fail_warning'] != '0'
 
         return True
 
     def _handlechangedvalue(self, path, value):
-        logging.debug("someone else updated %s to %s" % (path, value))
+        logging.info("someone else updated %s to %s" % (path, value))
         return True # accept the change
 
 def main():
@@ -120,7 +159,7 @@ def main():
     # Have a mainloop, so we can send/receive asynchronous calls to and from dbus
     DBusGMainLoop(set_as_default=True)
 
-    output = DbusMppSolarService(
+    mppservice = DbusMppSolarService(
         servicename='com.victronenergy.multi.mppsolar.{}'.format(args.serial.strip("/dev/")),
         deviceinstance=0,
         paths={
@@ -357,7 +396,7 @@ def main():
             #'/Dc/0/Temperature': {'initial': 10},
             #'/Soc': {'initial': 10},
             '/State': {'initial': 0}, #0=Off;1=Low Power;2=Fault;3=Bulk;4=Absorption;5=Float;6=Storage;7=Equalize;8=Passthru;9=Inverting;10=Power assist;11=Power supply;252=External control
-            '/Mode': {'initial': 4}, #1=Charger Only;2=Inverter Only;3=On;4=Off
+            '/Mode': {'initial': 4, 'update': 1}, #1=Charger Only;2=Inverter Only;3=On;4=Off
             '/Alarms/HighTemperature': {'initial': 0},
             '/Alarms/HighVoltage': {'initial': 0},
             '/Alarms/HighVoltageAcOut': {'initial': 0},
@@ -372,20 +411,20 @@ def main():
             '/MppOperationMode': {'initial': 0}, #0=Off;1=Voltage/current limited;2=MPPT active;255=Not available
             '/Pv/V': {'initial': 0},
             '/ErrorCode': {'initial': 0},
-            # '/Energy/AcIn1ToAcOut': {'initial': 0},
-            # '/Energy/AcIn1ToInverter': {'initial': 0},
-            # #'/Energy/AcIn2ToAcOut': {'initial': 0},
-            # #'/Energy/AcIn2ToInverter': {'initial': 0},
-            # '/Energy/AcOutToAcIn1': {'initial': 0},
-            # #'/Energy/AcOutToAcIn2': {'initial': 0},
-            # '/Energy/InverterToAcIn1': {'initial': 0},
-            # #'/Energy/InverterToAcIn2': {'initial': 0},
-            # '/Energy/InverterToAcOut': {'initial': 0},
-            # '/Energy/OutToInverter': {'initial': 0},
-            # '/Energy/SolarToAcIn1': {'initial': 0},
-            # #'/Energy/SolarToAcIn2': {'initial': 0},
-            # '/Energy/SolarToAcOut': {'initial': 0},
-            # '/Energy/SolarToBattery': {'initial': 0},
+            '/Energy/AcIn1ToAcOut': {'initial': 0},
+            '/Energy/AcIn1ToInverter': {'initial': 0},
+            #'/Energy/AcIn2ToAcOut': {'initial': 0},
+            #'/Energy/AcIn2ToInverter': {'initial': 0},
+            '/Energy/AcOutToAcIn1': {'initial': 0},
+            #'/Energy/AcOutToAcIn2': {'initial': 0},
+            '/Energy/InverterToAcIn1': {'initial': 0},
+            #'/Energy/InverterToAcIn2': {'initial': 0},
+            '/Energy/InverterToAcOut': {'initial': 0},
+            '/Energy/OutToInverter': {'initial': 0},
+            '/Energy/SolarToAcIn1': {'initial': 0},
+            #'/Energy/SolarToAcIn2': {'initial': 0},
+            '/Energy/SolarToAcOut': {'initial': 0},
+            '/Energy/SolarToBattery': {'initial': 0},
             '/History/Daily/0/Yield': {'initial': 0},
             '/History/Daily/0/MaxPower': {'initial': 0},
             #'/History/Daily/1/Yield': {'initial': 10},
@@ -416,10 +455,18 @@ def main():
             #'/Pv/3/P': {'initial': 1},
             '/Alarms/LowSoc': {'initial': 0},
             '/Yield/User': {'initial': 0},
-            '/Temperature': {'initial': 123}
+            '/Temperature': {'initial': 123},
+
+            '/Alarms/HighDcVoltage': {'initial': 0},
+            '/Alarms/LowDcVoltage': {'initial': 0},
+            '/Alarms/LineFail': {'initial': 0},
+
+            #'/Ac/In/1/CurrentLimitIsAdjustable': {'initial': 1},
+            #'/Settings/SystemSetup/MaxChargeCurrent': {'initial': 0}
         })
 
     logging.info('Connected to dbus, and switching over to GLib.MainLoop() (= event based)')
+    global mainloop
     mainloop = GLib.MainLoop()
     mainloop.run()
 
