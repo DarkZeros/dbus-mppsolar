@@ -17,45 +17,46 @@ import os
 import subprocess as sp
 import json
 from enum import Enum
+import datetime
 
 # our own packages
 sys.path.insert(1, os.path.join(os.path.dirname(__file__), 'velib_python'))
 from vedbus import VeDbusService
 # Should we import and call manually?
-# sys.path.insert(1, os.path.join(os.path.dirname(__file__), 'mpp-solar'))
-
+# sys.path.insert(1, os.path.join(os.path.dirname(__file__), 'mppsolar'))
+#from vedbus import VeDbusService
 def runInverterCommand(command):
     global args
     global mainloop
     try: 
         output = sp.getoutput("mpp-solar -b {} -P PI30 -p {} -o json -c {}".format(args.baudrate, args.serial, command)).split('\n')
         parsed = [json.loads(o) for o in output]
-    except Exception(e):
+    except Exception:
         mainloop.quit()
     return parsed
 
 def setOutputSource(source):
     #POP<NN>: Setting device output source priority
     #    NN = 00 for utility first, 01 for solar first, 02 for SBU priority
-    runInverterCommand('POP{:02d}'.format(source))
+    return runInverterCommand('POP{:02d}'.format(source))
 
 def setChargerPriority(priority):
     #PCP<NN>: Setting device charger priority
     #  For KS: 00 for utility first, 01 for solar first, 02 for solar and utility, 03 for only solar charging
     #  For MKS: 00 for utility first, 01 for solar first, 03 for only solar charging
-    runInverterCommand('PCP{:02d}'.format(priority))
+    return runInverterCommand('PCP{:02d}'.format(priority))
 
-def setMaxChargingCurrent(current):
-    #MNCHGC<mnnn><cr>: Setting max charging current (More than 100A)
-    #  Setting value can be gain by QMCHGCR command.
-    #  nnn is max charging current, m is parallel number.
-    runInverterCommand('MNCHGC0{:04d}'.format(current))
+# def setMaxChargingCurrent(current):
+#     #MNCHGC<mnnn><cr>: Setting max charging current (More than 100A)
+#     #  Setting value can be gain by QMCHGCR command.
+#     #  nnn is max charging current, m is parallel number.
+#     return runInverterCommand('MNCHGC0{:04d}'.format(current))
 
 def setMaxUtilityChargingCurrent(current):
     #MUCHGC<nnn><cr>: Setting utility max charging current
     #  Setting value can be gain by QMCHGCR command.
     #  nnn is max charging current, m is parallel number.
-    runInverterCommand('MUCHGC{:03d}'.format(current))
+    return runInverterCommand('MUCHGC{:03d}'.format(current))
 
 def isNaN(num):
     return num != num
@@ -85,33 +86,36 @@ class DbusMppSolarService(object):
             self._dbusservice.add_path(
                 path, settings['initial'], writeable=True, onchangecallback=self._handlechangedvalue)
 
-        GLib.timeout_add(2000, self._update)
+        GLib.timeout_add(4000, self._update)
 
     def _update(self):
+        logging.info("{} starting".format(datetime.datetime.now().time()))
         raw = runInverterCommand('QPIGS#QMOD#QPIWS')
         data, mode, warnings = raw
         logging.info(raw)
         with self._dbusservice as s:
-            # 1=Charger Only;2=Inverter Only;3=On;4=Off
-            #if 'error' in data and 'short' in data['error']:
-            #    s['/Mode'] = 4 # OFF
-            #else:
-            #    s['/Mode'] = 3 # ON
+            # 1=Charger Only;2=Inverter Only;3=On;4=Off -> Control from outside
+            if 'error' in data and 'short' in data['error']:
+                s['/State'] = 0
+                s['/Alarms/Connection'] = 2
             
             # 0=Off;1=Low Power;2=Fault;3=Bulk;4=Absorption;5=Float;6=Storage;7=Equalize;8=Passthru;9=Inverting;10=Power assist;11=Power supply;252=External control
             invMode = mode.get('device_mode', None)
             if invMode == 'Battery':
                 s['/State'] = 9 # Inverting
             elif invMode == 'Line':
-                s['/State'] = 8 # Passthru
+                if data.get('is_charging_on', 0) == 1:
+                    s['/State'] = 3 # Passthru + Charging? = Bulk
+                else:    
+                    s['/State'] = 8 # Passthru
             elif invMode == 'Standby':
-                s['/State'] = 0 # Standby? Off?
+                s['/State'] = data.get('is_charging_on', 0) * 6 # Standby = 0 -> OFF, Stanby + Charging = 6 -> "Storage" Storing power
             else:
                 s['/State'] = 0 # OFF
 
             # For my installation specific case: 
-            # - When we are in standbymode, the AC1/OUT are connected directly, and inverter is bypassed
-            if invMode == 'Standby':
+            # - When the load is off the output is unkonwn, the AC1/OUT are connected directly, and inverter is bypassed
+            if data.get('is_load_on', 0) == 0:
                 data['ac_output_active_power'] = data['ac_output_aparent_power'] = None          
 
             # Normal operation, read data
@@ -123,27 +127,78 @@ class DbusMppSolarService(object):
             s['/Ac/Out/L1/P'] = data.get('ac_output_active_power', None)
             s['/Ac/Out/L1/S'] = data.get('ac_output_aparent_power', None)
 
-            s['/Ac/In/1/L1/V'] = data.get('ac_input_voltage', None)
-            s['/Ac/In/1/L1/F'] = data.get('ac_input_frequency', None)
+            # Charger input, same as AC1 but separate line data
+            s['/Ac/In/1/L1/V'] = s['/Ac/In/2/L1/V'] = data.get('ac_input_voltage', None)
+            s['/Ac/In/1/L1/F'] = s['/Ac/In/2/L1/F'] = data.get('ac_input_frequency', None)
 
-            # It does not give us power of AC in, we need to compute it from the current state + Output power
+            # It does not give us power of AC in, we need to compute it from the current state + Output power + Charging on + Current
             s['/Ac/In/1/L1/P'] = 0 if invMode == 'Battery' else s['/Ac/Out/L1/P']
+            s['/Ac/In/2/L1/P'] = data.get('is_charging_on', 0) * 17 * data.get('battery_voltage', 0)
 
-            # Update some Alarms          
-            s['/Alarms/HighTemperature'] = warnings['over_temperature_fault'] != '0'
-            s['/Alarms/Overload'] = warnings['overload_fault'] != '0'
-            s['/Alarms/HighVoltage'] = warnings['bus_over_fault'] != '0'
-            s['/Alarms/LowVoltage'] = warnings['bus_under_fault'] != '0'
-            s['/Alarms/HighVoltageAcOut'] = warnings['inverter_voltage_too_high_fault'] != '0'
-            s['/Alarms/LowVoltageAcOut'] = warnings['inverter_voltage_too_low_fault'] != '0'
-            s['/Alarms/HighDcVoltage'] = warnings['battery_voltage_to_high_fault'] != '0'
-            s['/Alarms/LowDcVoltage'] = warnings['battery_low_alarm_warning'] != '0'
-            s['/Alarms/LineFail'] =  warnings['line_fail_warning'] != '0'
+            # Compute the currents as well?
+            #s['/Ac/In/1/L1/I'] = s['/Ac/In/1/L1/P'] / s['/Ac/In/1/L1/V']
+            #s['/Ac/In/1/L1/I'] = s['/Ac/In/1/L1/P'] / s['/Ac/In/2/L1/V']
 
+            # Select which output is more "active" to show (0 -> Active1, 1 -> Active2)
+            s['/Ac/ActiveIn/ActiveInput'] = 0 + ((s['/Ac/In/2/L1/P'] or 0) > (s['/Ac/In/1/L1/P'] or 0))
+
+            #Copy active In paths
+            s['/Ac/ActiveIn/L1/F'] = s['/Ac/In/1/L1/V']
+            #s['/Ac/ActiveIn/L1/I'] = s['/Ac/In/1/L1/I']
+            s['/Ac/ActiveIn/L1/P'] = s['/Ac/In/{}/L1/P'.format(s['/Ac/ActiveIn/ActiveInput'] + 1)]
+            s['/Ac/ActiveIn/L1/V'] = s['/Ac/In/{}/L1/V'.format(s['/Ac/ActiveIn/ActiveInput'] + 1)]
+            s['/Ac/ActiveIn/Type'] = s['/Ac/In/{}/Type'.format(s['/Ac/ActiveIn/ActiveInput'] + 1)]
+
+            # Update some Alarms
+            s['/Alarms/Connection'] = 0
+            s['/Alarms/HighTemperature'] = warnings.get('over_temperature_fault', '1')
+            s['/Alarms/Overload'] = warnings.get('overload_fault', '1')
+            s['/Alarms/HighVoltage'] = warnings.get('bus_over_fault', '1')
+            s['/Alarms/LowVoltage'] = warnings.get('bus_under_fault', '1')
+            s['/Alarms/HighVoltageAcOut'] = warnings.get('inverter_voltage_too_high_fault', '1')
+            s['/Alarms/LowVoltageAcOut'] = warnings.get('inverter_voltage_too_low_fault', '1')
+            s['/Alarms/HighDcVoltage'] = warnings.get('battery_voltage_to_high_fault', '1')
+            s['/Alarms/LowDcVoltage'] = warnings.get('battery_low_alarm_warning', '1')
+            s['/Alarms/LineFail'] =  warnings.get('line_fail_warning', '1')
+
+        logging.info("{} done".format(datetime.datetime.now().time()))
         return True
 
     def _handlechangedvalue(self, path, value):
         logging.info("someone else updated %s to %s" % (path, value))
+        if path == '/Settings/Commands/Reset':
+            logging.info("Restarting!")
+            mainloop.quit()
+        if path == '/Ac/In/2/CurrentLimit':
+            logging.info("setting max utility charging current to = {} ({})".format(value, setMaxUtilityChargingCurrent(value)))
+        if path == '/Mode': # 1=Charger Only;2=Inverter Only;3=On;4=Off(?)
+            if value == 1:
+                logging.info("setting mode to 'Charger Only'(Charger=Util & Output=Util->solar) ({},{})".format(setChargerPriority(0), setOutputSource(0)))
+            elif value == 2:
+                logging.info("setting mode to 'Inverter Only'(Charger=Solar & Output=SBU) ({},{})".format(setChargerPriority(3), setOutputSource(2)))
+            elif value == 3:
+                logging.info("setting mode to 'ON=Charge+Invert'(Charger=Util & Output=SBU) ({},{})".format(setChargerPriority(0), setOutputSource(2)))
+            elif value == 4:
+                logging.info("setting mode to 'OFF'(Charger=Solar & Output=Util->solar) ({},{})".format(setChargerPriority(3), setOutputSource(0)))
+            else:
+                logging.info("setting mode not understood ({})".format(value))
+        if path == '/Settings/Charger':
+            if value == 0:
+                logging.info("setting charger priority to utility first ({})".format(setChargerPriority(value)))
+            elif value == 1:
+                logging.info("setting charger priority to solar first ({})".format(setChargerPriority(value)))
+            elif value == 2:
+                logging.info("setting charger priority to solar and utility ({})".format(setChargerPriority(value)))
+            else:
+                logging.info("setting charger priority to only solar ({})".format(setChargerPriority(3)))
+        if path == '/Settings/Output':
+            if value == 0:
+                logging.info("setting output Utility->Solar priority ({})".format(setOutputSource(value)))
+            elif value == 1:
+                logging.info("setting output solar->Utility priority ({})".format(setOutputSource(value)))
+            else:
+                logging.info("setting output SBU priority ({})".format(setOutputSource(2)))
+        
         return True # accept the change
 
 def main():
@@ -160,7 +215,7 @@ def main():
     DBusGMainLoop(set_as_default=True)
 
     mppservice = DbusMppSolarService(
-        servicename='com.victronenergy.multi.mppsolar.{}'.format(args.serial.strip("/dev/")),
+        servicename='com.victronenergy.vebus.mppsolar.{}'.format(args.serial.strip("/dev/")),
         deviceinstance=0,
         paths={
             #'/Ac/In/Forward': {'initial': 0, 'update': 1},
@@ -168,14 +223,11 @@ def main():
             #'/Nonupdatingvalue/UseForTestingWritesForExample': {'initial': None},
             #'/DbusInvalid': {'initial': None}
 
-            # '/Ac/ActiveIn/L1/F': {'initial': -1},
-            # '/Ac/ActiveIn/L1/I': {'initial': -1},
-            # '/Ac/ActiveIn/L1/P': {'initial': -1},
-            # #'/Ac/ActiveIn/L1/S': {'initial': -1},
-            # '/Ac/ActiveIn/L1/V': {'initial': -1},
-
-            # '/Ac/ActiveIn/P': {'initial': -1},
-            # #'/Ac/ActiveIn/S': {'initial': -1},
+            '/Ac/ActiveIn/L1/F': {'initial': 0},
+            '/Ac/ActiveIn/L1/I': {'initial': 0},
+            '/Ac/ActiveIn/L1/P': {'initial': 0},
+            #/Ac/ActiveIn/L1/S': {'initial': -1},
+             '/Ac/ActiveIn/L1/V': {'initial': 0},
 
             # '/Ac/Out/L1/F': {'initial': -1},
             # '/Ac/Out/L1/I': {'initial': -1},
@@ -183,23 +235,23 @@ def main():
             # '/Ac/Out/L1/S': {'initial': -1},
             # '/Ac/Out/L1/V': {'initial': -1},
 
-            # '/Ac/ActiveIn/ActiveInput': {'initial': 0},               #Active input: 0 = ACin-1, 1 = ACin-2, 240 is none (inverting).
-            # '/Ac/ActiveIn/Connected': {'initial': 1},               #Active input: 0 = ACin-1, 1 = ACin-2, 240 is none (inverting).
-            # '/Ac/State/IgnoreAcIn1': {'initial': 0},                # 0 = AcIn1 is not ignored; 1 = AcIn1 is being ignored (by assistant configuration).
+            '/Ac/ActiveIn/ActiveInput': {'initial': 0},               #Active input: 0 = ACin-1, 1 = ACin-2, 240 is none (inverting).
+            '/Ac/ActiveIn/Connected': {'initial': 0},               #Active input: 0 = ACin-1, 1 = ACin-2, 240 is none (inverting).
+            '/Ac/State/IgnoreAcIn1': {'initial': 0},                # 0 = AcIn1 is not ignored; 1 = AcIn1 is being ignored (by assistant configuration).
             # '/Ac/In/1/Type': {'initial': 1},                        #0=Unused;1=Grid;2=Genset;3=Shore
             # '/Ac/In/1/CurrentLimit': {'initial': -1},
             # '/Ac/In/1/CurrentLimitIsAdjustable': {'initial': 0},
             # '/Ac/NumberOfPhases': {'initial': 1},
-            # '/Settings/SystemSetup/AcInput1': {'initial': 1},         #Type of that input: 0 (Not used), 1 (Grid), 2(Generator), 3(Shore).
-            # #'/Settings/SystemSetup/AcInput2': {'initial': 0},         #Type of that input: 0 (Not used), 1 (Grid), 2(Generator), 3(Shore).
-            # '/Ac/PowerMeasurementType': {'initial': 0}, # Type of measurement, 0-4, more accurate is 4
+            '/Settings/SystemSetup/AcInput1': {'initial': 1},         #Type of that input: 0 (Not used), 1 (Grid), 2(Generator), 3(Shore).
+            '/Settings/SystemSetup/AcInput2': {'initial': 10},         #Type of that input: 0 (Not used), 1 (Grid), 2(Generator), 3(Shore).
+            '/Ac/PowerMeasurementType': {'initial': 4}, # Type of measurement, 0-4, more accurate is 4
 
             # '/Dc/0/Voltage': {'initial': -1},
             # '/Dc/0/Current': {'initial': -1},
             # '/Dc/0/Power': {'initial': -1},
             # '/Dc/0/Temperature': {'initial': -1},
 
-            # '/Mode': {'initial': 4},                # 1=Charger Only;2=Inverter Only;3=On;4=Off
+            # '/Mode': {'initial': 0},                # 1=Charger Only;2=Inverter Only;3=On;4=Off
             # '/State': {'initial': 0},                #0=Off;1=Low Power;2=Fault;3=Bulk;4=Absorption;5=Float;6=Storage;7=Equalize;8=Passthru;9=Inverting;10=Power assist;11=Power supply;252=External control
             # '/ModeIsAdjustable': {'initial': 0},
             # '/VebusChargeState': {'initial': 0},
@@ -374,6 +426,12 @@ def main():
             #'/Ac/In/1/L2/P': {'initial': 0.1},
             #'/Ac/In/1/L3/P': {'initial': 0.1},
             '/Ac/In/1/L1/F': {'initial': 0},
+
+            '/Ac/In/2/L1/V': {'initial': 0},
+            '/Ac/In/2/L1/I': {'initial': 0},
+            '/Ac/In/2/L1/P': {'initial': 0},
+            '/Ac/In/2/L1/F': {'initial': 0},
+
             '/Ac/Out/L1/V': {'initial': 0},
             #'/Ac/Out/L2/V': {'initial': 10},
             #'/Ac/Out/L3/V': {'initial': 10},
@@ -386,17 +444,18 @@ def main():
             #'/Ac/Out/L3/P': {'initial': 0.1},
             '/Ac/Out/L1/F': {'initial': 0},
             '/Ac/In/1/Type': {'initial': 1}, #0=Unused;1=Grid;2=Genset;3=Shore
-            #'/Ac/In/2/Type': {'initial': 0}, #0=Unused;1=Grid;2=Genset;3=Shore
-            '/Ac/In/1/CurrentLimit': {'initial': 10},
-            #'/Ac/In/2/CurrentLimit': {'initial': 10},
+            '/Ac/In/2/Type': {'initial': 1}, #0=Unused;1=Grid;2=Genset;3=Shore
+            '/Ac/In/1/CurrentLimit': {'initial': 20},
+            '/Ac/In/2/CurrentLimit': {'initial': 20},
             '/Ac/NumberOfPhases': {'initial': 1},
             '/Ac/ActiveIn/ActiveInput': {'initial': 0},
+            '/Ac/ActiveIn/Type': {'initial': 0},
             '/Dc/0/Voltage': {'initial': 0},
             '/Dc/0/Current': {'initial': 0},
             #'/Dc/0/Temperature': {'initial': 10},
             #'/Soc': {'initial': 10},
             '/State': {'initial': 0}, #0=Off;1=Low Power;2=Fault;3=Bulk;4=Absorption;5=Float;6=Storage;7=Equalize;8=Passthru;9=Inverting;10=Power assist;11=Power supply;252=External control
-            '/Mode': {'initial': 4, 'update': 1}, #1=Charger Only;2=Inverter Only;3=On;4=Off
+            '/Mode': {'initial': 0}, #1=Charger Only;2=Inverter Only;3=On;4=Off
             '/Alarms/HighTemperature': {'initial': 0},
             '/Alarms/HighVoltage': {'initial': 0},
             '/Alarms/HighVoltageAcOut': {'initial': 0},
@@ -407,7 +466,7 @@ def main():
             '/Alarms/Ripple': {'initial': 0},
             '/Yield/Power': {'initial': 0},
             '/Yield/User': {'initial': 0},
-            #'/Relay/0/State': {'initial': 1},
+            '/Relay/0/State': {'initial': None},
             '/MppOperationMode': {'initial': 0}, #0=Off;1=Voltage/current limited;2=MPPT active;255=Not available
             '/Pv/V': {'initial': 0},
             '/ErrorCode': {'initial': 0},
@@ -460,9 +519,17 @@ def main():
             '/Alarms/HighDcVoltage': {'initial': 0},
             '/Alarms/LowDcVoltage': {'initial': 0},
             '/Alarms/LineFail': {'initial': 0},
+            '/Alarms/Connection': {'initial': 0},
 
-            #'/Ac/In/1/CurrentLimitIsAdjustable': {'initial': 1},
-            #'/Settings/SystemSetup/MaxChargeCurrent': {'initial': 0}
+            # '/Ac/In/1/CurrentLimitIsAdjustable': {'initial': 1},
+            # '/Ac/In/2/CurrentLimitIsAdjustable': {'initial': 1}, # FIX ME!
+            '/Settings/SystemSetup/MaxChargeCurrent': {'initial': 23},
+            '/Settings/SystemSetup/AcInput1': {'initial': 1},
+            '/Settings/SystemSetup/AcInput2': {'initial': 1},
+            '/ModeIsAdjustable': {'initial': 1},
+            '/Settings/Commands/Reset': {'initial': None},
+            '/Settings/Charger': {'initial': None},
+            '/Settings/Output': {'initial': None},
         })
 
     logging.info('Connected to dbus, and switching over to GLib.MainLoop() (= event based)')
