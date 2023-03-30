@@ -87,11 +87,11 @@ class DbusMppSolarService(object):
 
         # Create the services
         self._dbusmulti = VeDbusService(f'com.victronenergy.multi.mppsolar.{tty}', dbusconnection())
-        self._dbusvebus = VeDbusService(f'com.victronenergy.asd.mppsolar.{tty}', dbusconnection())
+        #self._dbusvebus = VeDbusService(f'com.victronenergy.asd.mppsolar.{tty}', dbusconnection())
 
         # Set up default paths
         self.setupDefaultPaths(self._dbusmulti, connection, deviceinstance, productname)
-        self.setupDefaultPaths(self._dbusvebus, connection, deviceinstance, productname)
+        #self.setupDefaultPaths(self._dbusvebus, connection, deviceinstance, productname)
 
         # Create paths for 'multi'
         self._dbusmulti.add_path('/Ac/In/1/L1/V', 0)
@@ -164,7 +164,7 @@ class DbusMppSolarService(object):
         self._dbusmulti.add_path('/Alarms/Connection', 0)
            
         # Create paths for 'vebus'
-        self._dbusvebus.add_path('/Ac/ActiveIn/L1/F', 0)
+        '''self._dbusvebus.add_path('/Ac/ActiveIn/L1/F', 0)
         self._dbusvebus.add_path('/Ac/ActiveIn/L1/I', 0)
         self._dbusvebus.add_path('/Ac/ActiveIn/L1/V', 0)
         self._dbusvebus.add_path('/Ac/ActiveIn/L1/P', 0)
@@ -182,7 +182,7 @@ class DbusMppSolarService(object):
         
         self._dbusvebus.add_path('/Mode', 0, writeable=True, onchangecallback=self._handlechangedvalue)
         self._dbusvebus.add_path('/State', 0)
-        #self._dbusvebus.add_path('/Ac/In/1/L1/V', 0, writeable=False, onchangecallback=self._handlechangedvalue)
+        #self._dbusvebus.add_path('/Ac/In/1/L1/V', 0, writeable=False, onchangecallback=self._handlechangedvalue)'''
 
         GLib.timeout_add(4000, self._update)
     
@@ -210,7 +210,7 @@ class DbusMppSolarService(object):
         raw = runInverterCommand('QPIGS#QMOD#QPIWS')
         data, mode, warnings = raw
         logging.info(raw)
-        with self._dbusmulti as s, self._dbusvebus as vebus:
+        with self._dbusmulti as s:
             # 1=Charger Only;2=Inverter Only;3=On;4=Off -> Control from outside
             if 'error' in data and 'short' in data['error']:
                 s['/State'] = 0
