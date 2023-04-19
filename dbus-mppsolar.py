@@ -50,11 +50,11 @@ def setChargerPriority(priority):
     #  For MKS: 00 for utility first, 01 for solar first, 03 for only solar charging
     return runInverterCommand('PCP{:02d}'.format(priority))
 
-# def setMaxChargingCurrent(current):
-#     #MNCHGC<mnnn><cr>: Setting max charging current (More than 100A)
-#     #  Setting value can be gain by QMCHGCR command.
-#     #  nnn is max charging current, m is parallel number.
-#     return runInverterCommand('MNCHGC0{:04d}'.format(current))
+def setMaxChargingCurrent(current):
+    #MNCHGC<mnnn><cr>: Setting max charging current (More than 100A)
+    #  Setting value can be gain by QMCHGCR command.
+    #  nnn is max charging current, m is parallel number.
+    return runInverterCommand('MNCHGC0{:04d}'.format(current))
 
 def setMaxUtilityChargingCurrent(current):
     #MUCHGC<nnn><cr>: Setting utility max charging current
@@ -78,7 +78,7 @@ def dbusconnection():
 
 # Our MPP solar service that conencts to 2 dbus services (multi & vebus)
 class DbusMppSolarService(object):
-    def __init__(self, tty, deviceinstance, productname='MPPSolar Inverter', connection='MPPSolar interface'):
+    def __init__(self, tty, deviceinstance, productname='MPPSolar', connection='MPPSolar interface'):
         self._tty = tty
 
         # Get data before broadcasting anything, or it will fail here
@@ -87,33 +87,33 @@ class DbusMppSolarService(object):
 
         # Create the services
         self._dbusmulti = VeDbusService(f'com.victronenergy.multi.mppsolar.{tty}', dbusconnection())
-        #self._dbusvebus = VeDbusService(f'com.victronenergy.asd.mppsolar.{tty}', dbusconnection())
+        self._dbusvebus = VeDbusService(f'com.victronenergy.vebus.mppsolar.{tty}', dbusconnection())
 
         # Set up default paths
-        self.setupDefaultPaths(self._dbusmulti, connection, deviceinstance, productname)
-        #self.setupDefaultPaths(self._dbusvebus, connection, deviceinstance, productname)
+        self.setupDefaultPaths(self._dbusmulti, connection, deviceinstance, f"Inverter {productname}")
+        self.setupDefaultPaths(self._dbusvebus, connection, deviceinstance, f"Vebus {productname}")
 
         # Create paths for 'multi'
         self._dbusmulti.add_path('/Ac/In/1/L1/V', 0)
         self._dbusmulti.add_path('/Ac/In/1/L1/I', 0)
         self._dbusmulti.add_path('/Ac/In/1/L1/P', 0)
         self._dbusmulti.add_path('/Ac/In/1/L1/F', 0)
-        self._dbusmulti.add_path('/Ac/In/2/L1/V', 0)
-        self._dbusmulti.add_path('/Ac/In/2/L1/I', 0)
-        self._dbusmulti.add_path('/Ac/In/2/L1/P', 0)
-        self._dbusmulti.add_path('/Ac/In/2/L1/F', 0)
+        #self._dbusmulti.add_path('/Ac/In/2/L1/V', 0)
+        #self._dbusmulti.add_path('/Ac/In/2/L1/I', 0)
+        #self._dbusmulti.add_path('/Ac/In/2/L1/P', 0)
+        #self._dbusmulti.add_path('/Ac/In/2/L1/F', 0)
         self._dbusmulti.add_path('/Ac/Out/L1/V', 0)
         self._dbusmulti.add_path('/Ac/Out/L1/I', 0)
         self._dbusmulti.add_path('/Ac/Out/L1/P', 0)
         self._dbusmulti.add_path('/Ac/Out/L1/S', 0)
         self._dbusmulti.add_path('/Ac/Out/L1/F', 0)
         self._dbusmulti.add_path('/Ac/In/1/Type', 1) #0=Unused;1=Grid;2=Genset;3=Shore
-        self._dbusmulti.add_path('/Ac/In/2/Type', 1) #0=Unused;1=Grid;2=Genset;3=Shore
+        #self._dbusmulti.add_path('/Ac/In/2/Type', 1) #0=Unused;1=Grid;2=Genset;3=Shore
         self._dbusmulti.add_path('/Ac/In/1/CurrentLimit', 20)
-        self._dbusmulti.add_path('/Ac/In/2/CurrentLimit', 20)
+        #self._dbusmulti.add_path('/Ac/In/2/CurrentLimit', 20)
         self._dbusmulti.add_path('/Ac/NumberOfPhases', 1)
         self._dbusmulti.add_path('/Ac/ActiveIn/ActiveInput', 0)
-        self._dbusmulti.add_path('/Ac/ActiveIn/Type', 0)
+        self._dbusmulti.add_path('/Ac/ActiveIn/Type', 1)
         self._dbusmulti.add_path('/Dc/0/Voltage', 0)
         self._dbusmulti.add_path('/Dc/0/Current', 0)
         #self._dbusmulti.add_path('/Dc/0/Temperature', 10)
@@ -164,7 +164,7 @@ class DbusMppSolarService(object):
         self._dbusmulti.add_path('/Alarms/Connection', 0)
            
         # Create paths for 'vebus'
-        '''self._dbusvebus.add_path('/Ac/ActiveIn/L1/F', 0)
+        self._dbusvebus.add_path('/Ac/ActiveIn/L1/F', 0)
         self._dbusvebus.add_path('/Ac/ActiveIn/L1/I', 0)
         self._dbusvebus.add_path('/Ac/ActiveIn/L1/V', 0)
         self._dbusvebus.add_path('/Ac/ActiveIn/L1/P', 0)
@@ -173,16 +173,25 @@ class DbusMppSolarService(object):
         self._dbusvebus.add_path('/Ac/ActiveIn/S', 0)
         self._dbusvebus.add_path('/Ac/ActiveIn/ActiveInput', 0)
 
-        self._dbusvebus.add_path('/Ac/In/1/CurrentLimit', 0, writeable=True, onchangecallback=self._handlechangedvalue)
+        self._dbusvebus.add_path('/Ac/Out/L1/V', 0)
+        self._dbusvebus.add_path('/Ac/Out/L1/I', 0)
+        self._dbusvebus.add_path('/Ac/Out/L1/P', 0)
+        self._dbusvebus.add_path('/Ac/Out/L1/S', 0)
+        self._dbusvebus.add_path('/Ac/Out/L1/F', 0)
+
+        self._dbusvebus.add_path('/Ac/NumberOfPhases', 1)
+        self._dbusvebus.add_path('/Dc/0/Voltage', 0)
+        self._dbusvebus.add_path('/Dc/0/Current', 0)
+
+        self._dbusvebus.add_path('/Ac/In/1/CurrentLimit', 20, writeable=True, onchangecallback=self._handlechangedvalue)
         self._dbusvebus.add_path('/Ac/In/1/CurrentLimitIsAdjustable', 1)
-        self._dbusvebus.add_path('/Ac/In/2/CurrentLimit', 0, writeable=True, onchangecallback=self._handlechangedvalue)
-        self._dbusvebus.add_path('/Ac/In/2/CurrentLimitIsAdjustable', 1)
         self._dbusvebus.add_path('/Settings/SystemSetup/AcInput1', 1)
-        self._dbusvebus.add_path('/Settings/SystemSetup/AcInput2', 1)
+        self._dbusvebus.add_path('/Ac/In/1/Type', 1) #0=Unused;1=Grid;2=Genset;3=Shore
         
         self._dbusvebus.add_path('/Mode', 0, writeable=True, onchangecallback=self._handlechangedvalue)
+        self._dbusvebus.add_path('/ModeIsAdjustable', 1)
         self._dbusvebus.add_path('/State', 0)
-        #self._dbusvebus.add_path('/Ac/In/1/L1/V', 0, writeable=False, onchangecallback=self._handlechangedvalue)'''
+        #self._dbusvebus.add_path('/Ac/In/1/L1/V', 0, writeable=False, onchangecallback=self._handlechangedvalue)
 
         GLib.timeout_add(4000, self._update)
     
@@ -210,25 +219,26 @@ class DbusMppSolarService(object):
         raw = runInverterCommand('QPIGS#QMOD#QPIWS')
         data, mode, warnings = raw
         logging.info(raw)
-        with self._dbusmulti as s:
+        with self._dbusmulti as m, self._dbusvebus as v:
             # 1=Charger Only;2=Inverter Only;3=On;4=Off -> Control from outside
             if 'error' in data and 'short' in data['error']:
-                s['/State'] = 0
-                s['/Alarms/Connection'] = 2
+                m['/State'] = 0
+                m['/Alarms/Connection'] = 2
             
             # 0=Off;1=Low Power;2=Fault;3=Bulk;4=Absorption;5=Float;6=Storage;7=Equalize;8=Passthru;9=Inverting;10=Power assist;11=Power supply;252=External control
             invMode = mode.get('device_mode', None)
             if invMode == 'Battery':
-                s['/State'] = 9 # Inverting
+                m['/State'] = 9 # Inverting
             elif invMode == 'Line':
                 if data.get('is_charging_on', 0) == 1:
-                    s['/State'] = 3 # Passthru + Charging? = Bulk
+                    m['/State'] = 3 # Passthru + Charging? = Bulk
                 else:    
-                    s['/State'] = 8 # Passthru
+                    m['/State'] = 8 # Passthru
             elif invMode == 'Standby':
-                s['/State'] = data.get('is_charging_on', 0) * 6 # Standby = 0 -> OFF, Stanby + Charging = 6 -> "Storage" Storing power
+                m['/State'] = data.get('is_charging_on', 0) * 6 # Standby = 0 -> OFF, Stanby + Charging = 6 -> "Storage" Storing power
             else:
-                s['/State'] = 0 # OFF
+                m['/State'] = 0 # OFF
+            v['/State'] = m['/State']
 
             # For my installation specific case: 
             # - When the load is off the output is unkonwn, the AC1/OUT are connected directly, and inverter is bypassed
@@ -236,52 +246,66 @@ class DbusMppSolarService(object):
                 data['ac_output_active_power'] = data['ac_output_aparent_power'] = None          
 
             # Normal operation, read data
-            s['/Dc/0/Voltage'] = data.get('battery_voltage', None)
-            s['/Dc/0/Current'] = data.get('battery_discharge_current', None)
+            v['/Dc/0/Voltage'] = m['/Dc/0/Voltage'] = data.get('battery_voltage', None)
+            m['/Dc/0/Current'] = data.get('battery_discharge_current', None)
+            #v['/Dc/0/Current'] = -m['/Dc/0/Current']
 
-            s['/Ac/Out/L1/V'] = data.get('ac_output_voltage', None)
-            s['/Ac/Out/L1/F'] = data.get('ac_output_frequency', None)
-            s['/Ac/Out/L1/P'] = data.get('ac_output_active_power', None)
-            s['/Ac/Out/L1/S'] = data.get('ac_output_aparent_power', None)
+            v['/Ac/Out/L1/V'] = m['/Ac/Out/L1/V'] = data.get('ac_output_voltage', None)
+            v['/Ac/Out/L1/F'] = m['/Ac/Out/L1/F'] = data.get('ac_output_frequency', None)
+            v['/Ac/Out/L1/P'] = m['/Ac/Out/L1/P'] = data.get('ac_output_active_power', None)
+            v['/Ac/Out/L1/S'] = m['/Ac/Out/L1/S'] = data.get('ac_output_aparent_power', None)
 
             # Charger input, same as AC1 but separate line data
-            s['/Ac/In/1/L1/V'] = s['/Ac/In/2/L1/V'] = data.get('ac_input_voltage', None)
-            s['/Ac/In/1/L1/F'] = s['/Ac/In/2/L1/F'] = data.get('ac_input_frequency', None)
+            v['/Ac/ActiveIn/L1/V'] = m['/Ac/In/1/L1/V'] = data.get('ac_input_voltage', None)
+            v['/Ac/ActiveIn/L1/F'] = m['/Ac/In/1/L1/F'] = data.get('ac_input_frequency', None)
 
             # It does not give us power of AC in, we need to compute it from the current state + Output power + Charging on + Current
-            s['/Ac/In/1/L1/P'] = 0 if invMode == 'Battery' else s['/Ac/Out/L1/P']
-            s['/Ac/In/2/L1/P'] = data.get('is_charging_on', 0) * 17 * data.get('battery_voltage', 0)
+            m['/Ac/In/1/L1/P'] = 0 if invMode == 'Battery' else m['/Ac/Out/L1/P']
+            m['/Ac/In/1/L1/P'] = (m['/Ac/In/1/L1/P'] or 0) + data.get('is_charging_on', 0) * 17 * data.get('battery_voltage', 0)
+            v['/Ac/ActiveIn/L1/P'] = m['/Ac/In/1/L1/P']
 
+            # Solar charger
+            m['/Pv/0/V'] = data.get('pv_input_voltage')
+            m['/Pv/0/P'] = data.get('pv_input_power')
+            m['/MppOperationMode'] = 2 if m['/Pv/0/P'] > 0 else 0
+			
             # Compute the currents as well?
-            # s['/Ac/Out/L1/I'] = s['/Ac/Out/L1/P'] / s['/Ac/Out/L1/V']
-            # s['/Ac/In/1/L1/I'] = s['/Ac/In/1/L1/P'] / s['/Ac/In/1/L1/V']
-            # s['/Ac/In/2/L1/I'] = s['/Ac/In/2/L1/P'] / s['/Ac/In/2/L1/V']
-
-            # Select which output is more "active" to show (0 -> Active1, 1 -> Active2)
-            s['/Ac/ActiveIn/ActiveInput'] = 0 + ((s['/Ac/In/2/L1/P'] or 0) > (s['/Ac/In/1/L1/P'] or 0))
+            # m['/Ac/Out/L1/I'] = m['/Ac/Out/L1/P'] / m['/Ac/Out/L1/V']
+            # m['/Ac/In/1/L1/I'] = m['/Ac/In/1/L1/P'] / m['/Ac/In/1/L1/V']
 
             # Update some Alarms
-            s['/Alarms/Connection'] = 0
-            s['/Alarms/HighTemperature'] = warnings.get('over_temperature_fault', '1')
-            s['/Alarms/Overload'] = warnings.get('overload_fault', '1')
-            s['/Alarms/HighVoltage'] = warnings.get('bus_over_fault', '1')
-            s['/Alarms/LowVoltage'] = warnings.get('bus_under_fault', '1')
-            s['/Alarms/HighVoltageAcOut'] = warnings.get('inverter_voltage_too_high_fault', '1')
-            s['/Alarms/LowVoltageAcOut'] = warnings.get('inverter_voltage_too_low_fault', '1')
-            s['/Alarms/HighDcVoltage'] = warnings.get('battery_voltage_to_high_fault', '1')
-            s['/Alarms/LowDcVoltage'] = warnings.get('battery_low_alarm_warning', '1')
-            s['/Alarms/LineFail'] =  warnings.get('line_fail_warning', '1')
+            m['/Alarms/Connection'] = 0
+            m['/Alarms/HighTemperature'] = warnings.get('over_temperature_fault', '1')
+            m['/Alarms/Overload'] = warnings.get('overload_fault', '1')
+            m['/Alarms/HighVoltage'] = warnings.get('bus_over_fault', '1')
+            m['/Alarms/LowVoltage'] = warnings.get('bus_under_fault', '1')
+            m['/Alarms/HighVoltageAcOut'] = warnings.get('inverter_voltage_too_high_fault', '1')
+            m['/Alarms/LowVoltageAcOut'] = warnings.get('inverter_voltage_too_low_fault', '1')
+            m['/Alarms/HighDcVoltage'] = warnings.get('battery_voltage_to_high_fault', '1')
+            m['/Alarms/LowDcVoltage'] = warnings.get('battery_low_alarm_warning', '1')
+            m['/Alarms/LineFail'] = warnings.get('line_fail_warning', '1')
+
+            # Misc
+            m['/Temperature'] = data.get('inverter_heat_sink_temperature', None)
 
         logging.info("{} done".format(datetime.datetime.now().time()))
         return True
+
+    def _updateInternal(self, path, value):
+        with self._dbusmulti as m, self._dbusvebus as v:
+            if m[path] != value:
+                m[path] = value
+            if v[path] != value:
+                v[path] = value 
 
     def _handlechangedvalue(self, path, value):
         logging.info("someone else updated %s to %s" % (path, value))
         if path == '/Settings/Reset':
             logging.info("Restarting!")
             mainloop.quit()
-        if path == '/Ac/In/2/CurrentLimit':
+        if path == '/Ac/In/1/CurrentLimit' or path == '/Ac/In/2/CurrentLimit':
             logging.info("setting max utility charging current to = {} ({})".format(value, setMaxUtilityChargingCurrent(value)))
+            self._updateInternal(path, value)
         if path == '/Mode': # 1=Charger Only;2=Inverter Only;3=On;4=Off(?)
             if value == 1:
                 logging.info("setting mode to 'Charger Only'(Charger=Util & Output=Util->solar) ({},{})".format(setChargerPriority(0), setOutputSource(0)))
@@ -293,6 +317,8 @@ class DbusMppSolarService(object):
                 logging.info("setting mode to 'OFF'(Charger=Solar & Output=Util->solar) ({},{})".format(setChargerPriority(3), setOutputSource(0)))
             else:
                 logging.info("setting mode not understood ({})".format(value))
+            self._updateInternal(path, value)
+        # Debug nodes
         if path == '/Settings/Charger':
             if value == 0:
                 logging.info("setting charger priority to utility first ({})".format(setChargerPriority(value)))
