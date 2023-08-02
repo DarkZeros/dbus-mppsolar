@@ -274,16 +274,21 @@ class DbusMppSolarService(object):
             # m['/Ac/In/1/L1/I'] = m['/Ac/In/1/L1/P'] / m['/Ac/In/1/L1/V']
 
             # Update some Alarms
+            def getWarning(string):
+                val = warnings.get(string, None)
+                if val is None:
+                    return 1
+                return int(val) * 2
             m['/Alarms/Connection'] = 0
-            m['/Alarms/HighTemperature'] = warnings.get('over_temperature_fault', '1')
-            m['/Alarms/Overload'] = warnings.get('overload_fault', '1')
-            m['/Alarms/HighVoltage'] = warnings.get('bus_over_fault', '1')
-            m['/Alarms/LowVoltage'] = warnings.get('bus_under_fault', '1')
-            m['/Alarms/HighVoltageAcOut'] = warnings.get('inverter_voltage_too_high_fault', '1')
-            m['/Alarms/LowVoltageAcOut'] = warnings.get('inverter_voltage_too_low_fault', '1')
-            m['/Alarms/HighDcVoltage'] = warnings.get('battery_voltage_to_high_fault', '1')
-            m['/Alarms/LowDcVoltage'] = warnings.get('battery_low_alarm_warning', '1')
-            m['/Alarms/LineFail'] = warnings.get('line_fail_warning', '1')
+            m['/Alarms/HighTemperature'] = getWarning('over_temperature_fault')
+            m['/Alarms/Overload'] = getWarning('overload_fault')
+            m['/Alarms/HighVoltage'] = getWarning('bus_over_fault')
+            m['/Alarms/LowVoltage'] = getWarning('bus_under_fault')
+            m['/Alarms/HighVoltageAcOut'] = getWarning('inverter_voltage_too_high_fault')
+            m['/Alarms/LowVoltageAcOut'] = getWarning('inverter_voltage_too_low_fault')
+            m['/Alarms/HighDcVoltage'] = getWarning('battery_voltage_to_high_fault')
+            m['/Alarms/LowDcVoltage'] = getWarning('battery_low_alarm_warning')
+            m['/Alarms/LineFail'] = getWarning('line_fail_warning')
 
             # Misc
             m['/Temperature'] = data.get('inverter_heat_sink_temperature', None)
