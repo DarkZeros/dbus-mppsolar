@@ -255,6 +255,10 @@ class DbusMppSolarService(object):
             v['/Ac/Out/L1/P'] = m['/Ac/Out/L1/P'] = data.get('ac_output_active_power', None)
             v['/Ac/Out/L1/S'] = m['/Ac/Out/L1/S'] = data.get('ac_output_aparent_power', None)
 
+            # For some reason, the system does not detect small values
+            if v['/Ac/Out/L1/P'] == None or v['/Ac/Out/L1/P'] == 0:
+                v['/Ac/Out/L1/P'] = v['/Ac/Out/L1/S'] = max(0, m['/Dc/0/Current'] - 0.8 ) * v['/Dc/0/Voltage']
+
             # Charger input, same as AC1 but separate line data
             v['/Ac/ActiveIn/L1/V'] = m['/Ac/In/1/L1/V'] = data.get('ac_input_voltage', None)
             v['/Ac/ActiveIn/L1/F'] = m['/Ac/In/1/L1/F'] = data.get('ac_input_frequency', None)
