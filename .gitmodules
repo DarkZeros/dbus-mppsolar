@@ -3,4 +3,4 @@
 	url = https://github.com/victronenergy/velib_python
 [submodule "mpp-solar"]
 	path = mpp-solar
-	url = https://github.com/jblance/mpp-solar
+	url = https://github.com/DarkZeros/mpp-solar
