@@ -204,7 +204,7 @@ class DbusMppSolarService(object):
         # self._dbusvebus.add_path('/State', 0)
         #self._dbusvebus.add_path('/Ac/In/1/L1/V', 0, writeable=False, onchangecallback=self._handlechangedvalue)
 
-        GLib.timeout_add(10000 if MPP_INSTALLED else 2000, self._update)
+        GLib.timeout_add(10000 if MPP_INSTALLED else 4000, self._update)
     
     def setupDefaultPaths(self, service, connection, deviceinstance, productname):
         # Create the management objects, as specified in the ccgx dbus-api document
@@ -267,14 +267,14 @@ class DbusMppSolarService(object):
                 m['/Ac/Out/L1/V'] = data.get('ac_output_voltage', None)
                 #v['/Ac/Out/L1/F'] = 
                 m['/Ac/Out/L1/F'] = data.get('ac_output_frequency', None)
-                #v['/Ac/Out/L1/P'] = 
+                #v['/Ac/Out/L1/P'] =1 
                 m['/Ac/Out/L1/P'] = data.get('ac_output_active_power', None)
                 #v['/Ac/Out/L1/S'] = 
                 m['/Ac/Out/L1/S'] = data.get('ac_output_aparent_power', None)
 
                 # For some reason, the system does not detect small values
-                if (m['/Ac/Out/L1/P'] == None or m['/Ac/Out/L1/P'] == 0) and m['/Dc/0/Current'] != None and m['/Dc/0/Voltage'] != None:
-                    m['/Ac/Out/L1/P'] = m['/Ac/Out/L1/S'] = max(0, m['/Dc/0/Current'] - 0.8 ) * m['/Dc/0/Voltage']
+                if (m['/Ac/Out/L1/P'] == 0 or m['/Ac/Out/L1/S'] == 0) and m['/Dc/0/Current'] != None and m['/Dc/0/Voltage'] != None:
+                    m['/Ac/Out/L1/P'] = m['/Ac/Out/L1/S'] = max(0, -m['/Dc/0/Current'] - 0.8 ) * m['/Dc/0/Voltage']
 
                 # Charger input, same as AC1 but separate line data
                 #v['/Ac/ActiveIn/L1/V'] = 
@@ -283,8 +283,11 @@ class DbusMppSolarService(object):
                 m['/Ac/In/1/L1/F'] = data.get('ac_input_frequency', None)
 
                 # It does not give us power of AC in, we need to compute it from the current state + Output power + Charging on + Current
-                m['/Ac/In/1/L1/P'] = 0 if invMode == 'Battery' else m['/Ac/Out/L1/P']
-                m['/Ac/In/1/L1/P'] = (m['/Ac/In/1/L1/P'] or 0) + data.get('is_charging_on', 0) * 17 * data.get('battery_voltage', 0)
+                if m['/State'] == 0:
+                    m['/Ac/In/1/L1/P'] = None # Unkown if inverter is off
+                else:
+                    m['/Ac/In/1/L1/P'] = 0 if invMode == 'Battery' else m['/Ac/Out/L1/P']
+                    m['/Ac/In/1/L1/P'] = (m['/Ac/In/1/L1/P'] or 0) + data.get('is_charging_on', 0) * 17 * data.get('battery_voltage', 0)
                 #v['/Ac/ActiveIn/L1/P'] = m['/Ac/In/1/L1/P']
 
                 # Solar charger
@@ -292,6 +295,7 @@ class DbusMppSolarService(object):
                 m['/Pv/0/P'] = data.get('pv_input_power', None)
                 m['/MppOperationMode'] = 2 if (m['/Pv/0/P'] != None and m['/Pv/0/P'] > 0) else 0
                 
+                m['/Dc/0/Current'] = -data.get('battery_discharge_current', None) + data.get('is_charging_on', 0) * 17
                 # Compute the currents as well?
                 # m['/Ac/Out/L1/I'] = m['/Ac/Out/L1/P'] / m['/Ac/Out/L1/V']
                 # m['/Ac/In/1/L1/I'] = m['/Ac/In/1/L1/P'] / m['/Ac/In/1/L1/V']
@@ -325,11 +329,11 @@ class DbusMppSolarService(object):
             return False
 
     def _updateInternal(self, path, value):
-        with self._dbusmulti as m, self._dbusvebus as v:
+        with self._dbusmulti as m:# self._dbusvebus as v:
             if m[path] != value:
                 m[path] = value
-            if v[path] != value:
-                v[path] = value 
+            #if v[path] != value:
+            #    v[path] = value 
 
     def _handlechangedvalue(self, path, value):
         logging.info("someone else updated %s to %s" % (path, value))
