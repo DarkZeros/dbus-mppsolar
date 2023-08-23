@@ -98,11 +98,11 @@ class DbusMppSolarService(object):
 
         # Create the services
         self._dbusmulti = VeDbusService(f'com.victronenergy.multi.mppsolar.{tty}', dbusconnection())
-        self._dbusvebus = VeDbusService(f'com.victronenergy.vebus.mppsolar.{tty}', dbusconnection())
+        #self._dbusvebus = VeDbusService(f'com.victronenergy.vebus.mppsolar.{tty}', dbusconnection())
 
         # Set up default paths
         self.setupDefaultPaths(self._dbusmulti, connection, deviceinstance, f"Inverter {productname}")
-        self.setupDefaultPaths(self._dbusvebus, connection, deviceinstance, f"Vebus {productname}")
+        #self.setupDefaultPaths(self._dbusvebus, connection, deviceinstance, f"Vebus {productname}")
 
         # Create paths for 'multi'
         self._dbusmulti.add_path('/Ac/In/1/L1/V', 0)
@@ -175,33 +175,33 @@ class DbusMppSolarService(object):
         self._dbusmulti.add_path('/Alarms/Connection', 0)
            
         # Create paths for 'vebus'
-        self._dbusvebus.add_path('/Ac/ActiveIn/L1/F', 0)
-        self._dbusvebus.add_path('/Ac/ActiveIn/L1/I', 0)
-        self._dbusvebus.add_path('/Ac/ActiveIn/L1/V', 0)
-        self._dbusvebus.add_path('/Ac/ActiveIn/L1/P', 0)
-        self._dbusvebus.add_path('/Ac/ActiveIn/L1/S', 0)
-        self._dbusvebus.add_path('/Ac/ActiveIn/P', 0)
-        self._dbusvebus.add_path('/Ac/ActiveIn/S', 0)
-        self._dbusvebus.add_path('/Ac/ActiveIn/ActiveInput', 0)
+        # self._dbusvebus.add_path('/Ac/ActiveIn/L1/F', 0)
+        # self._dbusvebus.add_path('/Ac/ActiveIn/L1/I', 0)
+        # self._dbusvebus.add_path('/Ac/ActiveIn/L1/V', 0)
+        # self._dbusvebus.add_path('/Ac/ActiveIn/L1/P', 0)
+        # self._dbusvebus.add_path('/Ac/ActiveIn/L1/S', 0)
+        # self._dbusvebus.add_path('/Ac/ActiveIn/P', 0)
+        # self._dbusvebus.add_path('/Ac/ActiveIn/S', 0)
+        # self._dbusvebus.add_path('/Ac/ActiveIn/ActiveInput', 0)
 
-        self._dbusvebus.add_path('/Ac/Out/L1/V', 0)
-        self._dbusvebus.add_path('/Ac/Out/L1/I', 0)
-        self._dbusvebus.add_path('/Ac/Out/L1/P', 0)
-        self._dbusvebus.add_path('/Ac/Out/L1/S', 0)
-        self._dbusvebus.add_path('/Ac/Out/L1/F', 0)
+        # self._dbusvebus.add_path('/Ac/Out/L1/V', 0)
+        # self._dbusvebus.add_path('/Ac/Out/L1/I', 0)
+        # self._dbusvebus.add_path('/Ac/Out/L1/P', 0)
+        # self._dbusvebus.add_path('/Ac/Out/L1/S', 0)
+        # self._dbusvebus.add_path('/Ac/Out/L1/F', 0)
 
-        self._dbusvebus.add_path('/Ac/NumberOfPhases', 1)
-        self._dbusvebus.add_path('/Dc/0/Voltage', 0)
-        self._dbusvebus.add_path('/Dc/0/Current', 0)
+        # self._dbusvebus.add_path('/Ac/NumberOfPhases', 1)
+        # self._dbusvebus.add_path('/Dc/0/Voltage', 0)
+        # self._dbusvebus.add_path('/Dc/0/Current', 0)
 
-        self._dbusvebus.add_path('/Ac/In/1/CurrentLimit', 20, writeable=True, onchangecallback=self._handlechangedvalue)
-        self._dbusvebus.add_path('/Ac/In/1/CurrentLimitIsAdjustable', 1)
-        self._dbusvebus.add_path('/Settings/SystemSetup/AcInput1', 1)
-        self._dbusvebus.add_path('/Ac/In/1/Type', 1) #0=Unused;1=Grid;2=Genset;3=Shore
+        # self._dbusvebus.add_path('/Ac/In/1/CurrentLimit', 20, writeable=True, onchangecallback=self._handlechangedvalue)
+        # self._dbusvebus.add_path('/Ac/In/1/CurrentLimitIsAdjustable', 1)
+        # self._dbusvebus.add_path('/Settings/SystemSetup/AcInput1', 1)
+        # self._dbusvebus.add_path('/Ac/In/1/Type', 1) #0=Unused;1=Grid;2=Genset;3=Shore
         
-        self._dbusvebus.add_path('/Mode', 0, writeable=True, onchangecallback=self._handlechangedvalue)
-        self._dbusvebus.add_path('/ModeIsAdjustable', 1)
-        self._dbusvebus.add_path('/State', 0)
+        # self._dbusvebus.add_path('/Mode', 0, writeable=True, onchangecallback=self._handlechangedvalue)
+        # self._dbusvebus.add_path('/ModeIsAdjustable', 1)
+        # self._dbusvebus.add_path('/State', 0)
         #self._dbusvebus.add_path('/Ac/In/1/L1/V', 0, writeable=False, onchangecallback=self._handlechangedvalue)
 
         GLib.timeout_add(10000 if MPP_INSTALLED else 2000, self._update)
@@ -231,7 +231,7 @@ class DbusMppSolarService(object):
         data, mode, warnings = raw
         logging.info(raw)
         try:
-            with self._dbusmulti as m, self._dbusvebus as v:
+            with self._dbusmulti as m:#, self._dbusvebus as v:
                 # 1=Charger Only;2=Inverter Only;3=On;4=Off -> Control from outside
                 if 'error' in data and 'short' in data['error']:
                     m['/State'] = 0
@@ -250,7 +250,7 @@ class DbusMppSolarService(object):
                     m['/State'] = data.get('is_charging_on', 0) * 6 # Standby = 0 -> OFF, Stanby + Charging = 6 -> "Storage" Storing power
                 else:
                     m['/State'] = 0 # OFF
-                v['/State'] = m['/State']
+                # v['/State'] = m['/State']
 
                 # For my installation specific case: 
                 # - When the load is off the output is unkonwn, the AC1/OUT are connected directly, and inverter is bypassed
@@ -258,27 +258,34 @@ class DbusMppSolarService(object):
                     data['ac_output_active_power'] = data['ac_output_aparent_power'] = None          
 
                 # Normal operation, read data
-                v['/Dc/0/Voltage'] = m['/Dc/0/Voltage'] = data.get('battery_voltage', None)
-                m['/Dc/0/Current'] = data.get('battery_discharge_current', None)
+                #v['/Dc/0/Voltage'] = 
+                m['/Dc/0/Voltage'] = data.get('battery_voltage', None)
+                m['/Dc/0/Current'] = -data.get('battery_discharge_current', None)
                 #v['/Dc/0/Current'] = -m['/Dc/0/Current']
 
-                v['/Ac/Out/L1/V'] = m['/Ac/Out/L1/V'] = data.get('ac_output_voltage', None)
-                v['/Ac/Out/L1/F'] = m['/Ac/Out/L1/F'] = data.get('ac_output_frequency', None)
-                v['/Ac/Out/L1/P'] = m['/Ac/Out/L1/P'] = data.get('ac_output_active_power', None)
-                v['/Ac/Out/L1/S'] = m['/Ac/Out/L1/S'] = data.get('ac_output_aparent_power', None)
+                #v['/Ac/Out/L1/V'] = 
+                m['/Ac/Out/L1/V'] = data.get('ac_output_voltage', None)
+                #v['/Ac/Out/L1/F'] = 
+                m['/Ac/Out/L1/F'] = data.get('ac_output_frequency', None)
+                #v['/Ac/Out/L1/P'] = 
+                m['/Ac/Out/L1/P'] = data.get('ac_output_active_power', None)
+                #v['/Ac/Out/L1/S'] = 
+                m['/Ac/Out/L1/S'] = data.get('ac_output_aparent_power', None)
 
                 # For some reason, the system does not detect small values
-                if (v['/Ac/Out/L1/P'] == None or v['/Ac/Out/L1/P'] == 0) and m['/Dc/0/Current'] != None and v['/Dc/0/Voltage'] != None:
-                    v['/Ac/Out/L1/P'] = v['/Ac/Out/L1/S'] = max(0, m['/Dc/0/Current'] - 0.8 ) * v['/Dc/0/Voltage']
+                if (m['/Ac/Out/L1/P'] == None or m['/Ac/Out/L1/P'] == 0) and m['/Dc/0/Current'] != None and m['/Dc/0/Voltage'] != None:
+                    m['/Ac/Out/L1/P'] = m['/Ac/Out/L1/S'] = max(0, m['/Dc/0/Current'] - 0.8 ) * m['/Dc/0/Voltage']
 
                 # Charger input, same as AC1 but separate line data
-                v['/Ac/ActiveIn/L1/V'] = m['/Ac/In/1/L1/V'] = data.get('ac_input_voltage', None)
-                v['/Ac/ActiveIn/L1/F'] = m['/Ac/In/1/L1/F'] = data.get('ac_input_frequency', None)
+                #v['/Ac/ActiveIn/L1/V'] = 
+                m['/Ac/In/1/L1/V'] = data.get('ac_input_voltage', None)
+                #v['/Ac/ActiveIn/L1/F'] = 
+                m['/Ac/In/1/L1/F'] = data.get('ac_input_frequency', None)
 
                 # It does not give us power of AC in, we need to compute it from the current state + Output power + Charging on + Current
                 m['/Ac/In/1/L1/P'] = 0 if invMode == 'Battery' else m['/Ac/Out/L1/P']
                 m['/Ac/In/1/L1/P'] = (m['/Ac/In/1/L1/P'] or 0) + data.get('is_charging_on', 0) * 17 * data.get('battery_voltage', 0)
-                v['/Ac/ActiveIn/L1/P'] = m['/Ac/In/1/L1/P']
+                #v['/Ac/ActiveIn/L1/P'] = m['/Ac/In/1/L1/P']
 
                 # Solar charger
                 m['/Pv/0/V'] = data.get('pv_input_voltage', None)
