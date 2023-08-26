@@ -5,7 +5,7 @@ Handle automatic connection with MPP Solar inverter compatible device (VEVOR)
 This will output 2 dbus services, one for Inverter data another one for control
 via VRM of the features.
 """
-VERSION = 'v0.1' 
+VERSION = 'v0.2' 
 
 from gi.repository import GLib
 import platform
@@ -22,7 +22,7 @@ import dbus.service
 
 # our own packages
 sys.path.insert(1, os.path.join(os.path.dirname(__file__), 'velib_python'))
-from vedbus import VeDbusService
+from vedbus import VeDbusService, VeDbusItemExport, VeDbusItemImport
 
 # Should we import and call manually, to use our version
 MPP_INSTALLED = False
@@ -95,7 +95,11 @@ class DbusMppSolarService(object):
         # Get data before broadcasting anything, or it will fail here
         self._invData = runInverterCommands(['QID','QVFW'])
         logging.debug("Successfully connected to inverter on {tty}, setting up dbus with /DeviceInstance = {deviceinstance}")
-
+        
+        # Create a listener to the DC system power, we need it to give some values
+        self._systemDcPower = VeDbusItemImport(dbusconnection(), 'com.victronenergy.system', '/Dc/System/Power')
+        self._dcLast = 0
+        
         # Create the services
         self._dbusmulti = VeDbusService(f'com.victronenergy.multi.mppsolar.{tty}', dbusconnection())
         #self._dbusvebus = VeDbusService(f'com.victronenergy.vebus.mppsolar.{tty}', dbusconnection())
@@ -229,6 +233,10 @@ class DbusMppSolarService(object):
         logging.info("{} starting".format(datetime.datetime.now().time()))
         raw = runInverterCommands(['QPIGS','QMOD','QPIWS'])
         data, mode, warnings = raw
+        dcPower = self._systemDcPower.get_value() + self._dcLast
+        logging.info(dcPower)
+        if dcPower is None:
+            dcPower = -1 # Disable the guessing later on
         logging.info(raw)
         try:
             with self._dbusmulti as m:#, self._dbusvebus as v:
@@ -274,7 +282,13 @@ class DbusMppSolarService(object):
 
                 # For some reason, the system does not detect small values
                 if (m['/Ac/Out/L1/P'] == 0 or m['/Ac/Out/L1/S'] == 0) and m['/Dc/0/Current'] != None and m['/Dc/0/Voltage'] != None:
-                    m['/Ac/Out/L1/P'] = m['/Ac/Out/L1/S'] = max(0, -m['/Dc/0/Current'] - 0.8 ) * m['/Dc/0/Voltage']
+                    if dcPower < 100 and dcPower > 25:
+                        m['/Ac/Out/L1/P'] = dcPower - 27
+                    else:
+                        m['/Ac/Out/L1/P'] = None
+                    self._dcLast = m['/Ac/Out/L1/P'] or 0
+                else:
+                    self._dcLast = 0
 
                 # Charger input, same as AC1 but separate line data
                 #v['/Ac/ActiveIn/L1/V'] = 
@@ -295,7 +309,7 @@ class DbusMppSolarService(object):
                 m['/Pv/0/P'] = data.get('pv_input_power', None)
                 m['/MppOperationMode'] = 2 if (m['/Pv/0/P'] != None and m['/Pv/0/P'] > 0) else 0
                 
-                m['/Dc/0/Current'] = -data.get('battery_discharge_current', None) + data.get('is_charging_on', 0) * 17
+                m['/Dc/0/Current'] = -data.get('battery_discharge_current', None) + data.get('is_charging_on', 0) * 17 - self._dcLast / (m['/Dc/0/Voltage'] or 27)
                 # Compute the currents as well?
                 # m['/Ac/Out/L1/I'] = m['/Ac/Out/L1/P'] / m['/Ac/Out/L1/V']
                 # m['/Ac/In/1/L1/I'] = m['/Ac/In/1/L1/P'] / m['/Ac/In/1/L1/V']
