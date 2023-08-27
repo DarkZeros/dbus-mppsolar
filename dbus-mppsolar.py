@@ -208,7 +208,7 @@ class DbusMppSolarService(object):
         # self._dbusvebus.add_path('/State', 0)
         #self._dbusvebus.add_path('/Ac/In/1/L1/V', 0, writeable=False, onchangecallback=self._handlechangedvalue)
 
-        GLib.timeout_add(10000 if MPP_INSTALLED else 4000, self._update)
+        GLib.timeout_add(10000 if MPP_INSTALLED else 2000, self._update)
     
     def setupDefaultPaths(self, service, connection, deviceinstance, productname):
         # Create the management objects, as specified in the ccgx dbus-api document
@@ -350,42 +350,46 @@ class DbusMppSolarService(object):
             #    v[path] = value 
 
     def _handlechangedvalue(self, path, value):
-        logging.info("someone else updated %s to %s" % (path, value))
+        logging.error("someone else updated %s to %s" % (path, value))
         if path == '/Settings/Reset':
             logging.info("Restarting!")
+            global mainloop
+            mainloop.quit()
             exit
         if path == '/Ac/In/1/CurrentLimit' or path == '/Ac/In/2/CurrentLimit':
             logging.info("setting max utility charging current to = {} ({})".format(value, setMaxUtilityChargingCurrent(value)))
             self._updateInternal(path, value)
         if path == '/Mode': # 1=Charger Only;2=Inverter Only;3=On;4=Off(?)
             if value == 1:
-                logging.info("setting mode to 'Charger Only'(Charger=Util & Output=Util->solar) ({},{})".format(setChargerPriority(0), setOutputSource(0)))
+                # logging.error("setting mode to 'Charger Only'(Charger=Util & Output=Util->solar) ({},{})".format(setChargerPriority(0), setOutputSource(0)))
+                logging.error("setting mode to 'Charger Only'(Charger=Util) ({})".format(setChargerPriority(0)))
             elif value == 2:
-                logging.info("setting mode to 'Inverter Only'(Charger=Solar & Output=SBU) ({},{})".format(setChargerPriority(3), setOutputSource(2)))
+                logging.error("setting mode to 'Inverter Only'(Charger=Solar & Output=SBU) ({},{})".format(setChargerPriority(3), setOutputSource(2)))
             elif value == 3:
-                logging.info("setting mode to 'ON=Charge+Invert'(Charger=Util & Output=SBU) ({},{})".format(setChargerPriority(0), setOutputSource(2)))
+                logging.error("setting mode to 'ON=Charge+Invert'(Charger=Util & Output=SBU) ({},{})".format(setChargerPriority(0), setOutputSource(2)))
             elif value == 4:
-                logging.info("setting mode to 'OFF'(Charger=Solar & Output=Util->solar) ({},{})".format(setChargerPriority(3), setOutputSource(0)))
+                # logging.error("setting mode to 'OFF'(Charger=Solar & Output=Util->solar) ({},{})".format(setChargerPriority(3), setOutputSource(0)))
+                logging.error("setting mode to 'OFF'(Charger=Solar) ({},{})".format(setChargerPriority(3)))
             else:
                 logging.info("setting mode not understood ({})".format(value))
             self._updateInternal(path, value)
         # Debug nodes
         if path == '/Settings/Charger':
             if value == 0:
-                logging.info("setting charger priority to utility first ({})".format(setChargerPriority(value)))
+                logging.error("setting charger priority to utility first ({})".format(setChargerPriority(value)))
             elif value == 1:
-                logging.info("setting charger priority to solar first ({})".format(setChargerPriority(value)))
+                logging.error("setting charger priority to solar first ({})".format(setChargerPriority(value)))
             elif value == 2:
-                logging.info("setting charger priority to solar and utility ({})".format(setChargerPriority(value)))
+                logging.error("setting charger priority to solar and utility ({})".format(setChargerPriority(value)))
             else:
-                logging.info("setting charger priority to only solar ({})".format(setChargerPriority(3)))
+                logging.error("setting charger priority to only solar ({})".format(setChargerPriority(3)))
         if path == '/Settings/Output':
             if value == 0:
-                logging.info("setting output Utility->Solar priority ({})".format(setOutputSource(value)))
+                logging.error("setting output Utility->Solar priority ({})".format(setOutputSource(value)))
             elif value == 1:
-                logging.info("setting output solar->Utility priority ({})".format(setOutputSource(value)))
+                logging.error("setting output solar->Utility priority ({})".format(setOutputSource(value)))
             else:
-                logging.info("setting output SBU priority ({})".format(setOutputSource(2)))
+                logging.error("setting output SBU priority ({})".format(setOutputSource(2)))
         
         return True # accept the change
 
