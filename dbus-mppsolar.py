@@ -260,11 +260,6 @@ class DbusMppSolarService(object):
                     m['/State'] = 0 # OFF
                 # v['/State'] = m['/State']
 
-                # For my installation specific case: 
-                # - When the load is off the output is unkonwn, the AC1/OUT are connected directly, and inverter is bypassed
-                if data.get('is_load_on', 0) == 0:
-                    data['ac_output_active_power'] = data['ac_output_aparent_power'] = None          
-
                 # Normal operation, read data
                 #v['/Dc/0/Voltage'] = 
                 m['/Dc/0/Voltage'] = data.get('battery_voltage', None)
@@ -281,14 +276,18 @@ class DbusMppSolarService(object):
                 m['/Ac/Out/L1/S'] = data.get('ac_output_aparent_power', None)
 
                 # For some reason, the system does not detect small values
-                if (m['/Ac/Out/L1/P'] == 0 or m['/Ac/Out/L1/S'] == 0) and m['/Dc/0/Current'] != None and m['/Dc/0/Voltage'] != None:
-                    if dcPower < 100 and dcPower > 25:
-                        m['/Ac/Out/L1/P'] = dcPower - 27
-                    else:
-                        m['/Ac/Out/L1/P'] = None
+                if (m['/Ac/Out/L1/P'] == 0) and data.get('is_load_on', 0) == 1 and m['/Dc/0/Current'] != None and m['/Dc/0/Voltage'] != None:
+                    power = 27 if dcPower < 27 else dcPower
+                    power = 100 if power > 100 else power
+                    m['/Ac/Out/L1/P'] = power - 27
                     self._dcLast = m['/Ac/Out/L1/P'] or 0
                 else:
                     self._dcLast = 0
+
+                # For my installation specific case: 
+                # - When the load is off the output is unkonwn, the AC1/OUT are connected directly, and inverter is bypassed
+                #if data.get('is_load_on', 0) == 0:
+                #    data['ac_output_active_power'] = data['ac_output_aparent_power'] = None          
 
                 # Charger input, same as AC1 but separate line data
                 #v['/Ac/ActiveIn/L1/V'] = 
