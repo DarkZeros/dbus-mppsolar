@@ -286,8 +286,8 @@ class DbusMppSolarService(object):
 
                 # For my installation specific case: 
                 # - When the load is off the output is unkonwn, the AC1/OUT are connected directly, and inverter is bypassed
-                #if data.get('is_load_on', 0) == 0:
-                #    data['ac_output_active_power'] = data['ac_output_aparent_power'] = None          
+                if data.get('is_load_on', 0) == 0:
+                    m['/Ac/Out/L1/P'] = m['/Ac/Out/L1/S'] = None
 
                 # Charger input, same as AC1 but separate line data
                 #v['/Ac/ActiveIn/L1/V'] = 
@@ -342,11 +342,12 @@ class DbusMppSolarService(object):
             return False
 
     def _updateInternal(self, path, value):
-        with self._dbusmulti as m:# self._dbusvebus as v:
-            if m[path] != value:
-                m[path] = value
-            #if v[path] != value:
-            #    v[path] = value 
+        pass
+        #with self._dbusmulti as m:# self._dbusvebus as v:
+        #    if m[path] != value:
+        #        m[path] = value
+        #    #if v[path] != value:
+        #    #    v[path] = value 
 
     def _handlechangedvalue(self, path, value):
         logging.error("someone else updated %s to %s" % (path, value))
