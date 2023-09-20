@@ -91,6 +91,7 @@ def dbusconnection():
 class DbusMppSolarService(object):
     def __init__(self, tty, deviceinstance, productname='MPPSolar', connection='MPPSolar interface'):
         self._tty = tty
+        self._queued_updates = []
 
         # Get data before broadcasting anything, or it will fail here
         self._invData = runInverterCommands(['QID','QVFW'])
@@ -333,6 +334,9 @@ class DbusMppSolarService(object):
                 # Misc
                 m['/Temperature'] = data.get('inverter_heat_sink_temperature', None)
 
+                # Execute updates of previously updated values
+                self._updateInternal()
+
             logging.info("{} done".format(datetime.datetime.now().time()))
             return True
         except:
@@ -341,13 +345,13 @@ class DbusMppSolarService(object):
             mainloop.quit()
             return False
 
-    def _updateInternal(self, path, value):
-        pass
-        #with self._dbusmulti as m:# self._dbusvebus as v:
-        #    if m[path] != value:
-        #        m[path] = value
-        #    #if v[path] != value:
-        #    #    v[path] = value 
+    def _updateInternal(self):
+        # Store in the paths all values that were updated from _handleChangedValue
+        with self._dbusmulti as m:# self._dbusvebus as v:
+            for path, value, in self._queued_updates:
+                m[path] = value
+                # v[path] = value
+            self._queued_updates = []
 
     def _handlechangedvalue(self, path, value):
         logging.error("someone else updated %s to %s" % (path, value))
@@ -358,21 +362,20 @@ class DbusMppSolarService(object):
             exit
         if path == '/Ac/In/1/CurrentLimit' or path == '/Ac/In/2/CurrentLimit':
             logging.info("setting max utility charging current to = {} ({})".format(value, setMaxUtilityChargingCurrent(value)))
-            self._updateInternal(path, value)
+            self._queued_updates.append((path, value))
+
         if path == '/Mode': # 1=Charger Only;2=Inverter Only;3=On;4=Off(?)
             if value == 1:
-                # logging.error("setting mode to 'Charger Only'(Charger=Util & Output=Util->solar) ({},{})".format(setChargerPriority(0), setOutputSource(0)))
-                logging.error("setting mode to 'Charger Only'(Charger=Util) ({})".format(setChargerPriority(0)))
+                logging.error("setting mode to 'Charger Only'(Charger=Util & Output=Util->solar) ({},{})".format(setChargerPriority(0), setOutputSource(0)))
             elif value == 2:
                 logging.error("setting mode to 'Inverter Only'(Charger=Solar & Output=SBU) ({},{})".format(setChargerPriority(3), setOutputSource(2)))
             elif value == 3:
                 logging.error("setting mode to 'ON=Charge+Invert'(Charger=Util & Output=SBU) ({},{})".format(setChargerPriority(0), setOutputSource(2)))
             elif value == 4:
-                # logging.error("setting mode to 'OFF'(Charger=Solar & Output=Util->solar) ({},{})".format(setChargerPriority(3), setOutputSource(0)))
-                logging.error("setting mode to 'OFF'(Charger=Solar) ({},{})".format(setChargerPriority(3)))
+                logging.error("setting mode to 'OFF'(Charger=Solar & Output=Util->solar) ({},{})".format(setChargerPriority(3), setOutputSource(0)))
             else:
                 logging.info("setting mode not understood ({})".format(value))
-            self._updateInternal(path, value)
+            self._queued_updates.append((path, value))
         # Debug nodes
         if path == '/Settings/Charger':
             if value == 0:
@@ -383,6 +386,7 @@ class DbusMppSolarService(object):
                 logging.error("setting charger priority to solar and utility ({})".format(setChargerPriority(value)))
             else:
                 logging.error("setting charger priority to only solar ({})".format(setChargerPriority(3)))
+            self._queued_updates.append((path, value))
         if path == '/Settings/Output':
             if value == 0:
                 logging.error("setting output Utility->Solar priority ({})".format(setOutputSource(value)))
@@ -390,6 +394,7 @@ class DbusMppSolarService(object):
                 logging.error("setting output solar->Utility priority ({})".format(setOutputSource(value)))
             else:
                 logging.error("setting output SBU priority ({})".format(setOutputSource(2)))
+            self._queued_updates.append((path, value))
         
         return True # accept the change
 
