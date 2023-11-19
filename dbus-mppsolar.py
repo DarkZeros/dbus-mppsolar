@@ -24,6 +24,9 @@ import dbus.service
 sys.path.insert(1, os.path.join(os.path.dirname(__file__), 'velib_python'))
 from vedbus import VeDbusService, VeDbusItemExport, VeDbusItemImport
 
+INVERTER_OFF_ASSUME_BYPASS = True
+GUESS_AC_CHARGING = True
+
 # Should we import and call manually, to use our version
 MPP_INSTALLED = False
 try:
@@ -34,15 +37,15 @@ except:
     import mppsolar
 
 # Inverter commands to read from the serial
-def runInverterCommands(commands):
+def runInverterCommands(commands, protocol="PI30"):
     global args
     global mainloop
     try: 
         if MPP_INSTALLED:
-            output = [sp.getoutput("mpp-solar -b {} -P PI30 -p {} -o json -c {}".format(args.baudrate, args.serial, c)).split('\n')[0] for c in commands]
+            output = [sp.getoutput("mpp-solar -b {} -P {} -p {} -o json -c {}".format(args.baudrate, protocol, args.serial, c)).split('\n')[0] for c in commands]
             parsed = [json.loads(o) for o in output]
         else:
-            dev = mppsolar.helpers.get_device_class("mppsolar")(port=args.serial, protocol="PI30", baud=args.baudrate)
+            dev = mppsolar.helpers.get_device_class("mppsolar")(port=args.serial, protocol=protocol, baud=args.baudrate)
             results = [dev.run_command(command=c) for c in commands]
             parsed = [mppsolar.outputs.to_json(r, False, None, None) for r in results]           
     except Exception:
@@ -100,6 +103,7 @@ class DbusMppSolarService(object):
         # Create a listener to the DC system power, we need it to give some values
         self._systemDcPower = VeDbusItemImport(dbusconnection(), 'com.victronenergy.system', '/Dc/System/Power')
         self._dcLast = 0
+        self._chargeLast = 0
         
         # Create the services
         self._dbusmulti = VeDbusService(f'com.victronenergy.multi.mppsolar.{tty}', dbusconnection())
@@ -234,10 +238,8 @@ class DbusMppSolarService(object):
         logging.info("{} starting".format(datetime.datetime.now().time()))
         raw = runInverterCommands(['QPIGS','QMOD','QPIWS'])
         data, mode, warnings = raw
-        dcPower = self._systemDcPower.get_value() + self._dcLast
-        logging.info(dcPower)
-        if dcPower is None:
-            dcPower = -1 # Disable the guessing later on
+        dcSystem = self._systemDcPower.get_value()
+        logging.info(dcSystem)
         logging.info(raw)
         try:
             with self._dbusmulti as m:#, self._dbusvebus as v:
@@ -264,8 +266,11 @@ class DbusMppSolarService(object):
                 # Normal operation, read data
                 #v['/Dc/0/Voltage'] = 
                 m['/Dc/0/Voltage'] = data.get('battery_voltage', None)
-                m['/Dc/0/Current'] = -data.get('battery_discharge_current', None)
+                m['/Dc/0/Current'] = -data.get('battery_discharge_current', 0)
                 #v['/Dc/0/Current'] = -m['/Dc/0/Current']
+                charging_ac_current = data.get('battery_charge_current', None)
+                load_on =  data.get('is_load_on', 0)
+                charging_ac = data.get('is_charging_on', 0)
 
                 #v['/Ac/Out/L1/V'] = 
                 m['/Ac/Out/L1/V'] = data.get('ac_output_voltage', None)
@@ -277,7 +282,8 @@ class DbusMppSolarService(object):
                 m['/Ac/Out/L1/S'] = data.get('ac_output_aparent_power', None)
 
                 # For some reason, the system does not detect small values
-                if (m['/Ac/Out/L1/P'] == 0) and data.get('is_load_on', 0) == 1 and m['/Dc/0/Current'] != None and m['/Dc/0/Voltage'] != None:
+                if (m['/Ac/Out/L1/P'] == 0) and load_on == 1 and m['/Dc/0/Current'] != None and m['/Dc/0/Voltage'] != None and dcSystem != None:
+                    dcPower = dcSystem + self._dcLast
                     power = 27 if dcPower < 27 else dcPower
                     power = 100 if power > 100 else power
                     m['/Ac/Out/L1/P'] = power - 27
@@ -285,9 +291,17 @@ class DbusMppSolarService(object):
                 else:
                     self._dcLast = 0
 
+                # Also, due to a bug (?), is not possible to get the battery charging current from AC
+                if GUESS_AC_CHARGING and dcSystem != None and charging_ac == 1:
+                    chargePower = dcSystem + self._chargeLast
+                    self._chargeLast = chargePower - 30
+                    charging_ac_current = -(chargePower - 30) / m['/Dc/0/Voltage']
+                else:
+                    self._chargeLast = 0
+
                 # For my installation specific case: 
                 # - When the load is off the output is unkonwn, the AC1/OUT are connected directly, and inverter is bypassed
-                if data.get('is_load_on', 0) == 0:
+                if INVERTER_OFF_ASSUME_BYPASS and load_on == 0:
                     m['/Ac/Out/L1/P'] = m['/Ac/Out/L1/S'] = None
 
                 # Charger input, same as AC1 but separate line data
@@ -301,7 +315,7 @@ class DbusMppSolarService(object):
                     m['/Ac/In/1/L1/P'] = None # Unkown if inverter is off
                 else:
                     m['/Ac/In/1/L1/P'] = 0 if invMode == 'Battery' else m['/Ac/Out/L1/P']
-                    m['/Ac/In/1/L1/P'] = (m['/Ac/In/1/L1/P'] or 0) + data.get('is_charging_on', 0) * 17 * data.get('battery_voltage', 0)
+                    m['/Ac/In/1/L1/P'] = (m['/Ac/In/1/L1/P'] or 0) + charging_ac * charging_ac_current * data.get('battery_voltage', 0)
                 #v['/Ac/ActiveIn/L1/P'] = m['/Ac/In/1/L1/P']
 
                 # Solar charger
@@ -309,7 +323,7 @@ class DbusMppSolarService(object):
                 m['/Pv/0/P'] = data.get('pv_input_power', None)
                 m['/MppOperationMode'] = 2 if (m['/Pv/0/P'] != None and m['/Pv/0/P'] > 0) else 0
                 
-                m['/Dc/0/Current'] = -data.get('battery_discharge_current', None) + data.get('is_charging_on', 0) * 17 - self._dcLast / (m['/Dc/0/Voltage'] or 27)
+                m['/Dc/0/Current'] = m['/Dc/0/Current'] + charging_ac * charging_ac_current - self._dcLast / (m['/Dc/0/Voltage'] or 27)
                 # Compute the currents as well?
                 # m['/Ac/Out/L1/I'] = m['/Ac/Out/L1/P'] / m['/Ac/Out/L1/V']
                 # m['/Ac/In/1/L1/I'] = m['/Ac/In/1/L1/P'] / m['/Ac/In/1/L1/V']
@@ -366,13 +380,15 @@ class DbusMppSolarService(object):
 
         if path == '/Mode': # 1=Charger Only;2=Inverter Only;3=On;4=Off(?)
             if value == 1:
-                logging.error("setting mode to 'Charger Only'(Charger=Util & Output=Util->solar) ({},{})".format(setChargerPriority(0), setOutputSource(0)))
+                #logging.error("setting mode to 'Charger Only'(Charger=Util & Output=Util->solar) ({},{})".format(setChargerPriority(0), setOutputSource(0)))
+                logging.error("setting mode to 'Charger Only'(Charger=Util) ({})".format(setChargerPriority(0)))
             elif value == 2:
                 logging.error("setting mode to 'Inverter Only'(Charger=Solar & Output=SBU) ({},{})".format(setChargerPriority(3), setOutputSource(2)))
             elif value == 3:
                 logging.error("setting mode to 'ON=Charge+Invert'(Charger=Util & Output=SBU) ({},{})".format(setChargerPriority(0), setOutputSource(2)))
             elif value == 4:
-                logging.error("setting mode to 'OFF'(Charger=Solar & Output=Util->solar) ({},{})".format(setChargerPriority(3), setOutputSource(0)))
+                #logging.error("setting mode to 'OFF'(Charger=Solar & Output=Util->solar) ({},{})".format(setChargerPriority(3), setOutputSource(0)))
+                logging.error("setting mode to 'OFF'(Charger=Solar) ({})".format(setChargerPriority(3)))
             else:
                 logging.info("setting mode not understood ({})".format(value))
             self._queued_updates.append((path, value))
