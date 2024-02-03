@@ -268,7 +268,7 @@ class DbusMppSolarService(object):
                 m['/Dc/0/Voltage'] = data.get('battery_voltage', None)
                 m['/Dc/0/Current'] = -data.get('battery_discharge_current', 0)
                 #v['/Dc/0/Current'] = -m['/Dc/0/Current']
-                charging_ac_current = data.get('battery_charge_current', None)
+                charging_ac_current = data.get('battery_charging_current', 0)
                 load_on =  data.get('is_load_on', 0)
                 charging_ac = data.get('is_charging_on', 0)
 
@@ -283,7 +283,7 @@ class DbusMppSolarService(object):
 
                 # For some reason, the system does not detect small values
                 if (m['/Ac/Out/L1/P'] == 0) and load_on == 1 and m['/Dc/0/Current'] != None and m['/Dc/0/Voltage'] != None and dcSystem != None:
-                    dcPower = dcSystem + self._dcLast
+                    dcPower = dcSystem + self._dcLast + 27
                     power = 27 if dcPower < 27 else dcPower
                     power = 100 if power > 100 else power
                     m['/Ac/Out/L1/P'] = power - 27
@@ -315,7 +315,7 @@ class DbusMppSolarService(object):
                     m['/Ac/In/1/L1/P'] = None # Unkown if inverter is off
                 else:
                     m['/Ac/In/1/L1/P'] = 0 if invMode == 'Battery' else m['/Ac/Out/L1/P']
-                    m['/Ac/In/1/L1/P'] = (m['/Ac/In/1/L1/P'] or 0) + charging_ac * charging_ac_current * data.get('battery_voltage', 0)
+                    m['/Ac/In/1/L1/P'] = (m['/Ac/In/1/L1/P'] or 0) + charging_ac * charging_ac_current * m['/Dc/0/Voltage']
                 #v['/Ac/ActiveIn/L1/P'] = m['/Ac/In/1/L1/P']
 
                 # Solar charger
