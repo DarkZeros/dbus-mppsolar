@@ -24,15 +24,18 @@ import dbus.service
 sys.path.insert(1, os.path.join(os.path.dirname(__file__), 'velib_python'))
 from vedbus import VeDbusService, VeDbusItemExport, VeDbusItemImport
 
+# Workarounds for some inverter specific problem I saw
 INVERTER_OFF_ASSUME_BYPASS = True
 GUESS_AC_CHARGING = True
 
 # Should we import and call manually, to use our version
-MPP_INSTALLED = False
-try:
-    import mppsolar
-    MPP_INSTALLED = True
-except:
+USE_SYSTEM_MPPSOLAR = False
+if USE_SYSTEM_MPPSOLAR:
+    try:
+        import mppsolar
+    except:
+        USE_SYSTEM_MPPSOLAR = FALSE
+if not USE_SYSTEM_MPPSOLAR:
     sys.path.insert(1, os.path.join(os.path.dirname(__file__), 'mpp-solar'))
     import mppsolar
 
@@ -41,7 +44,7 @@ def runInverterCommands(commands, protocol="PI30"):
     global args
     global mainloop
     try: 
-        if MPP_INSTALLED:
+        if USE_SYSTEM_MPPSOLAR:
             output = [sp.getoutput("mpp-solar -b {} -P {} -p {} -o json -c {}".format(args.baudrate, protocol, args.serial, c)).split('\n')[0] for c in commands]
             parsed = [json.loads(o) for o in output]
         else:
@@ -97,7 +100,8 @@ class DbusMppSolarService(object):
         self._queued_updates = []
 
         # Get data before broadcasting anything, or it will fail here
-        self._invData = runInverterCommands(['QID','QVFW'])
+        self._invProtocol = "PI30" #runInverterCommands(['QPI'])
+        self._invData = runInverterCommands(['QID','QVFW'], self._invProtocol)
         logging.debug("Successfully connected to inverter on {tty}, setting up dbus with /DeviceInstance = {deviceinstance}")
         
         # Create a listener to the DC system power, we need it to give some values
@@ -213,7 +217,7 @@ class DbusMppSolarService(object):
         # self._dbusvebus.add_path('/State', 0)
         #self._dbusvebus.add_path('/Ac/In/1/L1/V', 0, writeable=False, onchangecallback=self._handlechangedvalue)
 
-        GLib.timeout_add(10000 if MPP_INSTALLED else 2000, self._update)
+        GLib.timeout_add(10000 if USE_SYSTEM_MPPSOLAR else 2000, self._update)
     
     def setupDefaultPaths(self, service, connection, deviceinstance, productname):
         # Create the management objects, as specified in the ccgx dbus-api document
