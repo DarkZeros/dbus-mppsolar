@@ -106,8 +106,11 @@ class DbusMppSolarService(object):
         self._invProtocol = runInverterCommands(['QPI'])[0].get('protocol_id', 'PI30')
         if self._invProtocol == 'PI17':
             self._invData = runInverterCommands(['ID','VFW'], self._invProtocol)
-        else:
+        elif self._invProtocol == 'PI30':
             self._invData = runInverterCommands(['QID','QVFW'], self._invProtocol)
+        else:
+            logging.error(f"Detected inverter on {tty} ({self._invProtocol}), protocol not supported, using PI30 as fallback")       
+            self._invProtocol = 'PI30'
         logging.warning(f"Connected to inverter on {tty} ({self._invProtocol}), setting up dbus with /DeviceInstance = {deviceinstance}")
         
         # Create a listener to the DC system power, we need it to give some values
@@ -276,6 +279,7 @@ class DbusMppSolarService(object):
         else:
             pass #self._change_def()
 
+    # THIS IS COMPLETELY UNTESTED
     def _update_PI17(self):
         raw = runInverterCommands(['GS','MOD','WS'])
         data, mode, warnings = raw
