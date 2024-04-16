@@ -97,8 +97,15 @@ class DbusMppSolarService(object):
         self._tty = tty
         self._queued_updates = []
 
-        # Get data before broadcasting anything, or it will fail here
-        self._invProtocol = runInverterCommands(['QPI'])[0].get('protocol_id', 'PI30')
+        # Try to get the protocol version of the inverter
+        try:
+            self._invProtocol = runInverterCommands(['QPI'])[0].get('protocol_id', 'PI30')
+        except:
+            try:
+                self._invProtocol = runInverterCommands(['PI'])[0].get('protocol_id', 'PI17')
+            except:
+                logging.error("Protocol detection error, will probably fail now in the next steps")
+                self._invProtocol = "QPI"
         
         # Refine the protocol received, it may be the inverter is lying
         if self._invProtocol == 'PI30':
