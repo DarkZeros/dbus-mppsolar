@@ -118,7 +118,7 @@ class DbusMppSolarService(object):
         # Get inverter data based on protocol
         if self._invProtocol == 'PI17':
             self._invData = runInverterCommands(['ID','VFW'], self._invProtocol)
-        elif self._invProtocol == 'PI30':
+        elif self._invProtocol == 'PI30' or self._invProtocol == 'PI30MAX':
             self._invData = runInverterCommands(['QID','QVFW'], self._invProtocol)
         else:
             logging.error(f"Detected inverter on {tty} ({self._invProtocol}), protocol not supported, using PI30 as fallback")       
