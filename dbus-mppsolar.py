@@ -141,6 +141,9 @@ class DbusMppSolarService(object):
         self.setupDefaultPaths(self._dbusmulti, connection, deviceinstance, f"Inverter {productname}")
         #self.setupDefaultPaths(self._dbusvebus, connection, deviceinstance, f"Vebus {productname}")
 
+        # Register on the bus
+        #self._dbusmulti.register()
+
         # Create paths for 'multi'
         self._dbusmulti.add_path('/Ac/In/1/L1/V', 0)
         self._dbusmulti.add_path('/Ac/In/1/L1/I', 0)
@@ -244,6 +247,9 @@ class DbusMppSolarService(object):
         GLib.timeout_add(10000 if USE_SYSTEM_MPPSOLAR else 2000, self._update)
     
     def setupDefaultPaths(self, service, connection, deviceinstance, productname):
+        # self._dbusmulti.add_mandatory_paths(__file__, 'version f{VERSION}, and running on Python ' + platform.python_version(), connection,
+		# 	deviceinstance, self._invData[0].get('serial_number', 0), productname, self._invData[1].get('main_cpu_firmware_version', 0), 0, 1)
+
         # Create the management objects, as specified in the ccgx dbus-api document
         service.add_path('/Mgmt/ProcessName', __file__)
         service.add_path('/Mgmt/ProcessVersion', 'version f{VERSION}, and running on Python ' + platform.python_version())
