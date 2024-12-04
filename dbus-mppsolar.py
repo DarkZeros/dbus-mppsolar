@@ -126,10 +126,7 @@ class DbusMppSolarService(object):
         logging.warning(f"Connected to inverter on {tty} ({self._invProtocol}), setting up dbus with /DeviceInstance = {deviceinstance}")
         
         # Create a listener to the DC system power, we need it to give some values
-        try:
-            self._systemDcPower = VeDbusItemImport(dbusconnection(), 'com.victronenergy.system', '/Dc/System/Power')
-        except:
-            self._systemDcPower = None
+        self._systemDcPower = None        
         self._dcLast = 0
         self._chargeLast = 0
         
@@ -276,8 +273,17 @@ class DbusMppSolarService(object):
                 # v[path] = value
             self._queued_updates = []
 
+    def _connectToDc(self):
+        if self._systemDcPower is None:
+            try:
+                self._systemDcPower = VeDbusItemImport(dbusconnection(), 'com.victronenergy.system', '/Dc/System/Power')
+                logging.warning("Connected to DC at {}".format(datetime.datetime.now().time()))
+            except:
+                pass
+
     def _update(self):
         global mainloop
+        self._connectToDc()
         logging.info("{} updating".format(datetime.datetime.now().time()))
         try: 
             if self._invProtocol == 'PI30' or self._invProtocol == 'PI30MAX':
