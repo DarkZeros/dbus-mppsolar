@@ -36,7 +36,7 @@ if USE_SYSTEM_MPPSOLAR:
     try:
         import mppsolar
     except:
-        USE_SYSTEM_MPPSOLAR = FALSE
+        USE_SYSTEM_MPPSOLAR = False
 if not USE_SYSTEM_MPPSOLAR:
     sys.path.insert(1, os.path.join(os.path.dirname(__file__), 'mpp-solar'))
     import mppsolar
@@ -102,7 +102,12 @@ class DbusMppSolarService(object):
             self._invProtocol = runInverterCommands(['QPI'])[0].get('protocol_id', 'PI30')
         except:
             try:
-                self._invProtocol = runInverterCommands(['PI'])[0].get('protocol_id', 'PI17')
+                pi_result = runInverterCommands(['PI'])[0].get('protocol_id', 'PI17')
+                # Check if this is an InfiniSolar V (P18 protocol)
+                if pi_result == '18':
+                    self._invProtocol = 'PI18SV'  # Use PI18SV for InfiniSolar V series
+                else:
+                    self._invProtocol = pi_result
             except:
                 logging.error("Protocol detection error, will probably fail now in the next steps")
                 self._invProtocol = "QPI"
@@ -117,6 +122,8 @@ class DbusMppSolarService(object):
 
         # Get inverter data based on protocol
         if self._invProtocol == 'PI17':
+            self._invData = runInverterCommands(['ID','VFW'], self._invProtocol)
+        elif self._invProtocol == 'PI18SV':
             self._invData = runInverterCommands(['ID','VFW'], self._invProtocol)
         elif self._invProtocol == 'PI30' or self._invProtocol == 'PI30MAX':
             self._invData = runInverterCommands(['QID','QVFW'], self._invProtocol)
@@ -290,6 +297,8 @@ class DbusMppSolarService(object):
                 return self._update_PI30()
             elif self._invProtocol == 'PI17':
                 return self._update_PI17()
+            elif self._invProtocol == 'PI18SV':
+                return self._update_PI18SV()
             else:
                 return True #self._update_def()
         except:
@@ -309,6 +318,8 @@ class DbusMppSolarService(object):
                 return self._change_PI30(path, value)
             elif self._invProtocol == 'PI17':
                 return self._change_PI17(path, value)
+            elif self._invProtocol == 'PI18SV':
+                return self._change_PI18SV(path, value)
             else:
                 return True #self._change_def()
         except:
@@ -604,6 +615,133 @@ class DbusMppSolarService(object):
         #     else:
         #         logging.warning("setting output SBU priority ({})".format(setOutputSource(2)))
         #     self._queued_updates.append((path, value))
+        
+        return True # accept the change
+
+    def _update_PI18SV(self):
+        # PI18SV uses GS for general status and MOD for working mode
+        raw = runInverterCommands(['GS','MOD'], self._invProtocol) 
+        data, mode = raw
+        dcSystem = None
+        if self._systemDcPower != None:
+            dcSystem = self._systemDcPower.get_value()
+        logging.debug(dcSystem)
+        logging.debug(raw)
+        with self._dbusmulti as m, self._dbusvebus as v:
+            # Handle connection errors
+            if 'error' in data and 'short' in data['error']:
+                m['/State'] = 0
+                m['/Alarms/Connection'] = 2
+            
+            # Map PI18SV working modes to dbus states
+            # 0=Power on mode, 1=Standby mode, 2=Bypass mode, 3=Battery mode, 4=Fault mode, 5=Hybrid mode(Line mode, Grid mode)
+            invMode = mode.get('working_mode', None)
+            if invMode == 'Battery mode':
+                m['/State'] = 9 # Inverting
+            elif invMode == 'Hybrid mode(Line mode, Grid mode)':
+                if data.get('battery_charging_current', 0) > 0:
+                    m['/State'] = 3 # Bulk charging
+                else:    
+                    m['/State'] = 8 # Passthru
+            elif invMode == 'Standby mode':
+                m['/State'] = 6 if data.get('battery_charging_current', 0) > 0 else 0
+            elif invMode == 'Fault mode':
+                m['/State'] = 2 # Fault
+            else:
+                m['/State'] = 0 # OFF
+            v['/State'] = m['/State']
+
+            # Battery data
+            v['/Dc/0/Voltage'] = m['/Dc/0/Voltage'] = data.get('battery_voltage', None)
+            m['/Dc/0/Current'] = -data.get('battery_discharge_current', 0)
+            v['/Dc/0/Current'] = -m['/Dc/0/Current']
+            charging_ac_current = data.get('battery_charging_current', 0)
+            load_connected = data.get('load_connection', None) == 'connect'
+            
+            # AC Output data
+            v['/Ac/Out/L1/V'] = m['/Ac/Out/L1/V'] = data.get('ac_output_voltage', None)
+            v['/Ac/Out/L1/F'] = m['/Ac/Out/L1/F'] = data.get('ac_output_frequency', None)
+            v['/Ac/Out/L1/P'] = m['/Ac/Out/L1/P'] = data.get('ac_output_active_power', None)
+            v['/Ac/Out/L1/S'] = m['/Ac/Out/L1/S'] = data.get('ac_output_apparent_power', None)
+
+            # AC Input (Grid) data  
+            v['/Ac/ActiveIn/L1/V'] = m['/Ac/In/1/L1/V'] = data.get('grid_voltage', None)
+            v['/Ac/ActiveIn/L1/F'] = m['/Ac/In/1/L1/F'] = data.get('grid_frequency', None)
+
+            # Calculate AC input power
+            if m['/State'] == 0:
+                m['/Ac/In/1/L1/P'] = None
+            else:
+                m['/Ac/In/1/L1/P'] = 0 if invMode == 'Battery mode' else m['/Ac/Out/L1/P']
+                m['/Ac/In/1/L1/P'] = (m['/Ac/In/1/L1/P'] or 0) + (charging_ac_current * m['/Dc/0/Voltage'] if charging_ac_current > 0 else 0)
+            v['/Ac/ActiveIn/L1/P'] = m['/Ac/In/1/L1/P']
+
+            # Solar PV data - PI18SV supports dual PV inputs
+            pv1_power = data.get('pv1_input_power', 0)
+            pv2_power = data.get('pv2_input_power', 0)
+            total_pv_power = pv1_power + pv2_power
+            
+            m['/Pv/0/V'] = data.get('pv1_input_voltage', None)
+            m['/Pv/0/P'] = total_pv_power if total_pv_power > 0 else None
+            m['/MppOperationMode'] = 2 if total_pv_power > 0 else 0
+            
+            # Update DC current with charging
+            m['/Dc/0/Current'] = m['/Dc/0/Current'] + (charging_ac_current if charging_ac_current > 0 else 0)
+
+            # Temperature
+            m['/Temperature'] = data.get('inverter_heat_sink_temperature', None)
+
+            # Basic alarm handling (PI18SV can use FWS command for detailed warnings)
+            m['/Alarms/Connection'] = 0
+            
+            # Execute queued updates
+            self._updateInternal()
+
+        logging.info("{} done".format(datetime.datetime.now().time()))
+        return True
+
+    def _change_PI18SV(self, path, value):
+        # PI18SV protocol change handling for InfiniSolar V series
+        if path == '/Ac/In/1/CurrentLimit' or path == '/Ac/In/2/CurrentLimit':
+            # PI18SV uses MUCHGC command for AC charging current
+            logging.warning("setting max AC charging current to = {} (using MUCHGC command)".format(value))
+            try:
+                result = runInverterCommands(['MUCHGC0,{:03d}'.format(int(value))], self._invProtocol)
+                logging.warning("MUCHGC result: {}".format(result))
+            except Exception as e:
+                logging.error("Failed to set AC charging current: {}".format(e))
+            self._queued_updates.append((path, value))
+
+        if path == '/Settings/Charger':
+            # PI18SV uses PCP command for charger priority
+            try:
+                if value == 0:
+                    logging.warning("setting charger priority to solar first (PCP0,0)")
+                    result = runInverterCommands(['PCP0,0'], self._invProtocol)
+                elif value == 1:
+                    logging.warning("setting charger priority to solar and utility (PCP0,1)")
+                    result = runInverterCommands(['PCP0,1'], self._invProtocol)
+                else:
+                    logging.warning("setting charger priority to only solar (PCP0,2)")
+                    result = runInverterCommands(['PCP0,2'], self._invProtocol)
+                logging.warning("PCP result: {}".format(result))
+            except Exception as e:
+                logging.error("Failed to set charger priority: {}".format(e))
+            self._queued_updates.append((path, value))
+            
+        if path == '/Settings/Output':
+            # PI18SV uses POP command for output priority
+            try:
+                if value == 0:
+                    logging.warning("setting output Solar-Utility-Battery priority (POP0)")
+                    result = runInverterCommands(['POP0'], self._invProtocol)
+                else:
+                    logging.warning("setting output Solar-Battery-Utility priority (POP1)")
+                    result = runInverterCommands(['POP1'], self._invProtocol)
+                logging.warning("POP result: {}".format(result))
+            except Exception as e:
+                logging.error("Failed to set output priority: {}".format(e))
+            self._queued_updates.append((path, value))
         
         return True # accept the change
 
