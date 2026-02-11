@@ -372,7 +372,7 @@ class DbusMppSolarService(object):
             if GUESS_AC_CHARGING and dcSystem != None and charging_ac == 1:
                 chargePower = dcSystem + self._chargeLast
                 self._chargeLast = chargePower - 30
-                charging_ac_current = -(chargePower - 30) / m['/Dc/0/Voltage']
+                charging_ac_current = charging_ac_current + -(chargePower - 30) / m['/Dc/0/Voltage']
             else:
                 self._chargeLast = 0
 
